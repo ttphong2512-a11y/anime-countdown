@@ -15,7 +15,7 @@ color:white;
 font-family:Arial;
 text-align:center;
 ">
-<h2>📺 Đang tải anime...</h2>
+<h2>📺 Loading anime...</h2>
 </div>
 `;
 
@@ -74,7 +74,7 @@ let m=Math.floor((diff/(1000*60))%60);
 let s=Math.floor((diff/1000)%60);
 
 document.getElementById("countdown-time").innerHTML=
-`${d} ngày ${h} giờ ${m} phút ${s} giây`;
+`${d} Days ${h} Hours ${m} Minutes ${s} Seconds;
 
 }
 
@@ -114,7 +114,7 @@ text-align:center;
 
 <h2>🐱 ${anime.title.english || anime.title.romaji}</h2>
 
-<p>✅ Anime đã phát sóng đầy đủ hoặc chưa có lịch tập tiếp theo.</p>
+<p>✅ The anime has finished airing or has no upcoming episode schedule..</p>
 
 </div>
 `;
