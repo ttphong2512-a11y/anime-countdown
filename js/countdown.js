@@ -90,7 +90,7 @@ font-family:Arial;
 text-align:center;
 ">
 
-<h2>🐱 ${anime.title.english || anime.title.romaji}</h2>
+<h2> ${anime.title.english || anime.title.romaji}</h2>
 
 <p>Tập tiếp theo: ${anime.nextAiringEpisode.episode}</p>
 
