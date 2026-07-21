@@ -74,7 +74,7 @@ let m=Math.floor((diff/(1000*60))%60);
 let s=Math.floor((diff/1000)%60);
 
 document.getElementById("countdown-time").innerHTML=
-`${d} Days ${h} Hours ${m} Minutes ${s} Seconds;
+`${d} Days ${h} Hours ${m} Minutes ${s} Seconds`;
 
 }
 
