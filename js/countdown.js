@@ -239,8 +239,6 @@ window.updateCountdownLang=function(){
 
 lang = localStorage.getItem("lang") || "vi";
 
-location.reload();
-
 };
 
 
