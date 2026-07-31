@@ -2,6 +2,7 @@
   "loading": "📺 애니메이션 로딩 중...",
   "next": "다음 에피소드:",
   "calculating": "계산 중...",
+  "no_schedule": "📅 방영 일정이 없습니다",
   "days": "일",
   "hours": "시간",
   "minutes": "분",
