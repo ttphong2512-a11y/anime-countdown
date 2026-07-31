@@ -231,11 +231,11 @@ target - Date.now();
 if(distance <= 0){
 
 timer.innerHTML =
-text.calculating;
+text.no_schedule || text.calculating;
 
 return;
 
-}
+    }
 
 
 
