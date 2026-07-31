@@ -207,11 +207,11 @@ document.getElementById("countdown-time");
 if(!anime.nextAiringEpisode){
 
 timer.innerHTML =
-text.calculating;
+text.no_schedule || text.calculating;
 
 return;
 
-}
+ }
 
 
 
