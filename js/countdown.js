@@ -438,7 +438,7 @@ box.innerHTML = `
 
 <div class="anime-error">
 
-${text.calculating}
+${text.no_schedule || text.calculating}
 
 </div>
 
