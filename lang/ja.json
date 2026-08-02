@@ -1,9 +1,9 @@
 {
   "loading": "📺 アニメを読み込み中...",
-  "next": "次のエピソード:",
+  "next": "次回放送:",
   "calculating": "計算中...",
   "no_schedule": "📅 放送予定なし",
-  "finished": "✅ 完了",
+  "finished": "✅ 完結",
   "episodes": "話",
   "duration": "分/話",
   "days": "日",
