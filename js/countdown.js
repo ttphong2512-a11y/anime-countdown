@@ -335,7 +335,7 @@ anime.status === "FINISHED"
 ?
 text.finished
 :
-"📺 Releasing"
+"📺 " + text.releasing
 }
 
 </div>
