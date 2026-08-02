@@ -1,8 +1,8 @@
 {
   "loading": "📺 Chargement de l'anime...",
-  "next": "Prochain épisode:",
+  "next": "Prochain épisode :",
   "calculating": "Calcul en cours...",
-  "no_schedule": "📅 Aucun calendrier de diffusion",
+  "no_schedule": "📅 Aucun programme de diffusion",
   "finished": "✅ Terminé",
   "episodes": "Épisodes",
   "duration": "min/épisode",
