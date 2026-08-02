@@ -384,6 +384,10 @@ text.duration
 
 
 
+${
+anime.status !== "FINISHED"
+?
+`
 <div class="anime-next">
 
 ${text.next}
@@ -399,6 +403,12 @@ anime.nextAiringEpisode.episode
 }
 
 </span>
+
+</div>
+`
+:
+""
+}
 
 
 </div>
