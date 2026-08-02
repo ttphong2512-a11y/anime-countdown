@@ -1,9 +1,10 @@
 {
   "loading": "📺 애니메이션 불러오는 중...",
-  "next": "다음 화:",
+  "next": "다음 에피소드:",
   "calculating": "계산 중...",
   "no_schedule": "📅 방영 일정 없음",
   "finished": "✅ 완결",
+  "releasing": "방영 중",
   "episodes": "화",
   "duration": "분/화",
   "days": "일",
