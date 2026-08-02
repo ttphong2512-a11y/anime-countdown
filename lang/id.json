@@ -1,10 +1,13 @@
 {
   "loading": "📺 Memuat anime...",
-  "next": "Episode berikutnya:",
+  "next": "Episode Berikutnya:",
   "calculating": "Menghitung...",
-  "no_schedule": "📅 Belum ada jadwal tayang",
-  "days": "hari",
-  "hours": "jam",
-  "minutes": "menit",
-  "seconds": "detik"
+  "no_schedule": "📅 Tidak ada jadwal tayang",
+  "finished": "✅ Selesai",
+  "episodes": "Episode",
+  "duration": "menit/episode",
+  "days": "Hari",
+  "hours": "Jam",
+  "minutes": "Menit",
+  "seconds": "Detik"
 }
