@@ -1,10 +1,13 @@
 {
   "loading": "📺 Chargement de l'anime...",
-  "next": "Prochain épisode :",
+  "next": "Prochain épisode:",
   "calculating": "Calcul en cours...",
-  "no_schedule": "📅 Aucune date de diffusion",
-  "days": "jours",
-  "hours": "heures",
-  "minutes": "minutes",
-  "seconds": "secondes"
+  "no_schedule": "📅 Aucun calendrier de diffusion",
+  "finished": "✅ Terminé",
+  "episodes": "Épisodes",
+  "duration": "min/épisode",
+  "days": "Jours",
+  "hours": "Heures",
+  "minutes": "Minutes",
+  "seconds": "Secondes"
 }
