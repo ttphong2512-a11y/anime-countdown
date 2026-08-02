@@ -442,25 +442,8 @@ document.getElementById("countdown-time");
 if(
 anime.status === "FINISHED"
 ){
-
-
-timer.innerHTML = `
-
-${text.finished}
-
-<br>
-
-📺 ${anime.episodes || "?"} ${text.episodes}
-
-<br>
-
-⏱ ${anime.duration || "?"} ${text.duration}
-
-`;
-
-
-return;
-
+    timer.innerHTML = "";
+    return;
 }
 
 
