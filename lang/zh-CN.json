@@ -1,8 +1,11 @@
 {
-  "loading": "📺 正在加载动漫...",
+  "loading": "📺 正在加载动画...",
   "next": "下一集:",
   "calculating": "计算中...",
-  "no_schedule": "📅 暂无播出时间",
+  "no_schedule": "📅 暂无播出计划",
+  "finished": "✅ 已完结",
+  "episodes": "集",
+  "duration": "分钟/集",
   "days": "天",
   "hours": "小时",
   "minutes": "分钟",
