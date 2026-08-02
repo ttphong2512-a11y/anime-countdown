@@ -1,10 +1,13 @@
 {
   "loading": "📺 Đang tải anime...",
   "next": "Tập tiếp theo:",
-  "calculating": "Đang tính...",
+  "calculating": "Đang tính toán...",
   "no_schedule": "📅 Chưa có lịch phát sóng",
-  "days": "ngày",
-  "hours": "giờ",
-  "minutes": "phút",
-  "seconds": "giây"
+  "finished": "✅ Đã hoàn thành",
+  "episodes": "tập",
+  "duration": "phút/tập",
+  "days": "Ngày",
+  "hours": "Giờ",
+  "minutes": "Phút",
+  "seconds": "Giây"
 }
