@@ -63,12 +63,15 @@ return await res.json();
 
 }catch(e){
 
-
 return {
 
 loading:"📺 Loading anime...",
 next:"Next Episode:",
 calculating:"Calculating...",
+no_schedule:"📅 No airing schedule",
+finished:"✅ Completed",
+episodes:"Episodes",
+duration:"min/episode",
 days:"Days",
 hours:"Hours",
 minutes:"Minutes",
@@ -76,11 +79,9 @@ seconds:"Seconds"
 
 };
 
-
 }
 
 }
-
 
 
 
@@ -88,7 +89,9 @@ seconds:"Seconds"
 // CACHE
 // =====================
 
-const CACHE_TIME = 6 * 60 * 60 * 1000;
+const CACHE_TIME =
+6 * 60 * 60 * 1000;
+
 
 
 function cacheKey(){
@@ -103,6 +106,7 @@ function getCache(){
 
 try{
 
+
 const item =
 localStorage.getItem(cacheKey());
 
@@ -110,7 +114,28 @@ localStorage.getItem(cacheKey());
 if(!item) return null;
 
 
-return JSON.parse(item);
+
+const cache =
+JSON.parse(item);
+
+
+
+if(
+Date.now() - cache.time
+>
+CACHE_TIME
+){
+
+localStorage.removeItem(cacheKey());
+
+return null;
+
+}
+
+
+
+return cache.data;
+
 
 
 }catch(e){
@@ -126,6 +151,7 @@ return null;
 function saveCache(data){
 
 try{
+
 
 localStorage.setItem(
 
@@ -144,156 +170,31 @@ data:data
 
 }catch(e){}
 
-}
 
+}
 
 
 
 // =====================
-// COUNTDOWN DISPLAY
+// LOADING
 // =====================
 
-
-function showAnime(anime,text){
-
-
-if(!anime){
-
-return;
-
-}
-
+function showLoading(text){
 
 box.innerHTML = `
 
-<div class="anime-countdown-box">
+<div class="anime-loading">
 
-<h2>
-${anime.title?.romaji || ""}
-</h2>
-
-
-<div class="anime-next">
-
-${text.next}
-
-${anime.nextAiringEpisode
-?
-" "+anime.nextAiringEpisode.episode
-:
-""}
-
-</div>
-
-
-<div id="countdown-time">
-
-${text.calculating}
-
-</div>
-
+${text.loading}
 
 </div>
 
 `;
 
-
-
-const timer =
-document.getElementById("countdown-time");
-
-
-
-if(!anime.nextAiringEpisode){
-
-timer.innerHTML =
-text.no_schedule || text.calculating;
-
-return;
-
- }
-
-
-
-const target =
-anime.nextAiringEpisode.airingAt * 1000;
-
-
-
-function update(){
-
-
-const distance =
-target - Date.now();
-
-
-
-if(distance <= 0){
-
-timer.innerHTML =
-text.no_schedule || text.calculating;
-
-return;
-
-    }
-
-
-
-const days =
-Math.floor(distance / 86400000);
-
-
-const hours =
-Math.floor(
-(distance % 86400000) / 3600000
-);
-
-
-const minutes =
-Math.floor(
-(distance % 3600000) / 60000
-);
-
-
-const seconds =
-Math.floor(
-(distance % 60000) / 1000
-);
-
-
-
-timer.innerHTML = `
-
-${days} ${text.days}
-
-<br>
-
-${hours} ${text.hours}
-
-${minutes} ${text.minutes}
-
-${seconds} ${text.seconds}
-
-`;
-
 }
-
-
-
-update();
-
-setInterval(update,1000);
-
-
-}
-
-
-
-
-// =====================
+    // =====================
 // ANILIST API
 // =====================
-
 
 async function fetchAniList(){
 
@@ -304,11 +205,27 @@ query {
 
 Media(id:${animeId}, type:ANIME){
 
+
 title{
 
 romaji
 
+english
+
+native
+
 }
+
+
+status
+
+
+episodes
+
+
+duration
+
+
 
 nextAiringEpisode{
 
@@ -317,6 +234,8 @@ episode
 airingAt
 
 }
+
+
 
 }
 
@@ -366,29 +285,133 @@ await response.json();
 
 
 
-return result.data.Media;
+if(
+!result.data ||
+!result.data.Media
+){
 
+throw Error("No anime data");
 
 }
 
 
 
+return result.data.Media;
 
+
+ }
+    // =====================
+// DISPLAY ANIME
 // =====================
-// START
-// =====================
+
+function showAnime(anime,text){
 
 
-loadLanguage()
+if(!anime){
 
-.then(async text=>{
+return;
+
+}
+
 
 
 box.innerHTML = `
 
-<div class="anime-loading">
+<div class="anime-countdown-box">
 
-${text.loading}
+
+<h2>
+
+${anime.title?.romaji || ""}
+
+</h2>
+
+
+
+<div class="anime-status">
+
+${
+anime.status === "FINISHED"
+?
+text.finished
+:
+"📺 Releasing"
+}
+
+</div>
+
+
+
+<div class="anime-info">
+
+
+${
+anime.episodes
+?
+"📺 "
++
+anime.episodes
++
+" "
++
+text.episodes
+:
+""
+
+}
+
+
+<br>
+
+
+${
+anime.duration
+?
+"⏱ "
++
+anime.duration
++
+" "
++
+text.duration
+:
+""
+
+}
+
+
+</div>
+
+
+
+<div class="anime-next">
+
+${text.next}
+
+<span id="next-episode">
+
+${
+anime.nextAiringEpisode
+?
+anime.nextAiringEpisode.episode
+:
+""
+}
+
+</span>
+
+
+</div>
+
+
+
+<div id="countdown-time">
+
+${text.calculating}
+
+</div>
+
+
 
 </div>
 
@@ -396,22 +419,191 @@ ${text.loading}
 
 
 
-const old =
-getCache();
+const timer =
+document.getElementById("countdown-time");
 
 
-// hiện cache trước
 
-if(old && old.data){
+// =====================
+// FINISHED ANIME
+// =====================
 
-showAnime(old.data,text);
+
+if(
+anime.status === "FINISHED"
+){
+
+
+timer.innerHTML = `
+
+${text.finished}
+
+<br>
+
+📺 ${anime.episodes || "?"} ${text.episodes}
+
+<br>
+
+⏱ ${anime.duration || "?"} ${text.duration}
+
+`;
+
+
+return;
 
 }
 
 
 
-// gọi API cập nhật
+// =====================
+// NO AIRING
+// =====================
 
+
+if(
+!anime.nextAiringEpisode
+){
+
+
+timer.innerHTML =
+text.no_schedule;
+
+
+return;
+
+}
+
+
+
+
+// =====================
+// COUNTDOWN
+// =====================
+
+
+const target =
+anime.nextAiringEpisode.airingAt * 1000;
+
+
+
+function update(){
+
+
+
+const distance =
+target - Date.now();
+
+
+
+if(distance <= 0){
+
+
+timer.innerHTML =
+text.no_schedule;
+
+
+return;
+
+
+}
+
+
+
+
+const days =
+Math.floor(
+distance / 86400000
+);
+
+
+
+const hours =
+Math.floor(
+(distance % 86400000)
+/3600000
+);
+
+
+
+const minutes =
+Math.floor(
+(distance % 3600000)
+/60000
+);
+
+
+
+const seconds =
+Math.floor(
+(distance % 60000)
+/1000
+);
+
+
+
+timer.innerHTML = `
+
+
+${days} ${text.days}
+
+
+<br>
+
+
+${hours} ${text.hours}
+
+
+${minutes} ${text.minutes}
+
+
+${seconds} ${text.seconds}
+
+
+`;
+
+
+
+}
+
+
+
+update();
+
+
+setInterval(update,1000);
+
+
+
+    }
+    // =====================
+// START
+// =====================
+
+loadLanguage()
+
+.then(async text=>{
+
+
+showLoading(text);
+
+
+
+const old =
+getCache();
+
+
+
+// Hiện cache trước nếu có
+
+if(old){
+
+showAnime(old,text);
+
+}
+
+
+
+// Lấy dữ liệu mới
 
 try{
 
@@ -420,8 +612,14 @@ const fresh =
 await fetchAniList();
 
 
+
+// lưu cache
+
 saveCache(fresh);
 
+
+
+// cập nhật giao diện
 
 showAnime(fresh,text);
 
@@ -431,14 +629,22 @@ showAnime(fresh,text);
 
 
 
-if(!old){
+// AniList lỗi nhưng có cache
+
+if(old){
+
+showAnime(old,text);
+
+
+
+}else{
 
 
 box.innerHTML = `
 
 <div class="anime-error">
 
-${text.no_schedule || text.calculating}
+${text.no_schedule}
 
 </div>
 
@@ -447,13 +653,11 @@ ${text.no_schedule || text.calculating}
 }
 
 
-
 }
 
 
 
 });
-
 
 
 })();
