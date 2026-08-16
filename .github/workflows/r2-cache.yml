@@ -1,0 +1,30 @@
+name: Update Anime Cache
+
+on:
+  schedule:
+    - cron: "17 */24 * * *"
+  workflow_dispatch:
+
+jobs:
+  update-cache:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install @aws-sdk/client-s3
+
+      - name: Update R2 cache
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: https://5cdad020d02db4b8aa5b7b96fe8282ce.r2.cloudflarestorage.com
+          R2_BUCKET: ogeview-anime
+        run: node .github/workflows/update-cache.js
