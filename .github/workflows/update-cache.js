@@ -1,6 +1,8 @@
 const {
   S3Client,
-  PutObjectCommand
+  PutObjectCommand,
+  ListObjectsV2Command,
+  DeleteObjectsCommand
 } = require("@aws-sdk/client-s3");
 
 const endpoint = process.env.R2_ENDPOINT;
@@ -115,8 +117,7 @@ async function saveToR2(id, data) {
 
       Bucket: bucket,
 
-      Key:
-        `anime/${id}.json`,
+      Key: `anime/${id}.json`,
 
       Body: body,
 
@@ -127,6 +128,140 @@ async function saveToR2(id, data) {
         "public, max-age=3600"
     })
   );
+}
+
+/*
+|--------------------------------------------------------------------------
+| GET OLD FILES FROM R2
+|--------------------------------------------------------------------------
+*/
+
+async function getOldAnimeFiles() {
+
+  const result = [];
+
+  let continuationToken = undefined;
+
+  do {
+
+    const response = await client.send(
+      new ListObjectsV2Command({
+
+        Bucket: bucket,
+
+        Prefix: "anime/",
+
+        ContinuationToken:
+          continuationToken
+
+      })
+    );
+
+    if (response.Contents) {
+
+      for (const object of response.Contents) {
+
+        if (
+          object.Key &&
+          object.Key.endsWith(".json")
+        ) {
+
+          result.push(object.Key);
+
+        }
+
+      }
+
+    }
+
+    continuationToken =
+      response.NextContinuationToken;
+
+  } while (continuationToken);
+
+  return result;
+}
+
+/*
+|--------------------------------------------------------------------------
+| DELETE OLD FILES
+|--------------------------------------------------------------------------
+*/
+
+async function deleteOldFiles(
+  animeList
+) {
+
+  const currentIds = new Set(
+    animeList.map(
+      anime => String(anime.id)
+    )
+  );
+
+  const oldFiles =
+    await getOldAnimeFiles();
+
+  const filesToDelete =
+    oldFiles.filter(key => {
+
+      const filename =
+        key
+          .replace("anime/", "")
+          .replace(".json", "");
+
+      return !currentIds.has(filename);
+
+    });
+
+  if (
+    filesToDelete.length === 0
+  ) {
+
+    console.log(
+      "No old anime files to delete."
+    );
+
+    return;
+
+  }
+
+  console.log(
+    `Deleting ${filesToDelete.length} old anime files...`
+  );
+
+  for (
+    let i = 0;
+    i < filesToDelete.length;
+    i += 1000
+  ) {
+
+    const batch =
+      filesToDelete.slice(
+        i,
+        i + 1000
+      );
+
+    await client.send(
+      new DeleteObjectsCommand({
+
+        Bucket: bucket,
+
+        Delete: {
+
+          Objects:
+            batch.map(
+              Key => ({ Key })
+            )
+
+        }
+
+      })
+    );
+
+    console.log(
+      `Deleted ${batch.length} old files.`
+    );
+  }
 }
 
 /*
@@ -147,6 +282,12 @@ async function main() {
   console.log(
     `Found ${animeList.length} anime.`
   );
+
+  /*
+  |--------------------------------------------------------------------------
+  | UPDATE CURRENT ANIME
+  |--------------------------------------------------------------------------
+  */
 
   for (
     const anime of animeList
@@ -177,6 +318,16 @@ async function main() {
     }
   }
 
+  /*
+  |--------------------------------------------------------------------------
+  | DELETE OLD ANIME
+  |--------------------------------------------------------------------------
+  */
+
+  await deleteOldFiles(
+    animeList
+  );
+
   console.log(
     "Anime cache update finished."
   );
@@ -185,7 +336,9 @@ async function main() {
 main().catch(
   error => {
 
-    console.error(error);
+    console.error(
+      error
+    );
 
     process.exit(1);
 
