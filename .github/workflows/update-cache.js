@@ -21,18 +21,40 @@ const client = new S3Client({
 
 /*
 |--------------------------------------------------------------------------
+| SETTINGS
+|--------------------------------------------------------------------------
+*/
+
+const PER_PAGE = 50;
+const MAX_ANIME = 500;
+
+/*
+|--------------------------------------------------------------------------
 | ANILIST QUERY
 |--------------------------------------------------------------------------
 */
 
 const query = `
-query {
-  Page(page: 1, perPage: 500) {
+query ($page: Int, $perPage: Int) {
+
+  Page(
+    page: $page
+    perPage: $perPage
+  ) {
+
+    pageInfo {
+      currentPage
+      lastPage
+      hasNextPage
+    }
+
     media(
       type: ANIME
       status: RELEASING
       sort: POPULARITY_DESC
+      isAdult: false
     ) {
+
       id
 
       title {
@@ -62,40 +84,148 @@ query {
 
 async function getReleasingAnime() {
 
-  const response = await fetch(
-    "https://graphql.anilist.co",
-    {
-      method: "POST",
+  const allAnime = [];
 
-      headers: {
-        "Content-Type": "application/json"
-      },
+  let page = 1;
 
-      body: JSON.stringify({
-        query
-      })
-    }
-  );
-
-  if (!response.ok) {
-    throw new Error(
-      `AniList HTTP ${response.status}`
-    );
-  }
-
-  const json = await response.json();
-
-  if (
-    json.errors ||
-    !json.data ||
-    !json.data.Page
+  while (
+    allAnime.length < MAX_ANIME
   ) {
-    throw new Error(
-      "AniList returned invalid data"
+
+    console.log(
+      `Getting AniList page ${page}...`
+    );
+
+    const response = await fetch(
+      "https://graphql.anilist.co",
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type":
+            "application/json"
+        },
+
+        body: JSON.stringify({
+
+          query,
+
+          variables: {
+            page,
+            perPage: PER_PAGE
+          }
+
+        })
+      }
+    );
+
+    if (!response.ok) {
+
+      throw new Error(
+        `AniList HTTP ${response.status}`
+      );
+
+    }
+
+    const json =
+      await response.json();
+
+    if (
+      json.errors ||
+      !json.data ||
+      !json.data.Page
+    ) {
+
+      throw new Error(
+        "AniList returned invalid data"
+      );
+
+    }
+
+    const pageData =
+      json.data.Page;
+
+    const media =
+      pageData.media || [];
+
+    /*
+    |--------------------------------------------------------------------------
+    | ONLY ANIME WITH NEXT EPISODE
+    |--------------------------------------------------------------------------
+    */
+
+    const airingAnime =
+      media.filter(
+        anime =>
+          anime.nextAiringEpisode !== null
+      );
+
+    allAnime.push(
+      ...airingAnime
+    );
+
+    console.log(
+      `Page ${page}: ${airingAnime.length} anime with next episode`
+    );
+
+    /*
+    |--------------------------------------------------------------------------
+    | STOP CONDITIONS
+    |--------------------------------------------------------------------------
+    */
+
+    if (
+      !pageData.pageInfo.hasNextPage
+    ) {
+
+      break;
+
+    }
+
+    if (
+      media.length === 0
+    ) {
+
+      break;
+
+    }
+
+    page++;
+
+    /*
+    |--------------------------------------------------------------------------
+    | SMALL DELAY
+    |--------------------------------------------------------------------------
+    */
+
+    await new Promise(
+      resolve =>
+        setTimeout(resolve, 1000)
     );
   }
 
-  return json.data.Page.media;
+  /*
+  |--------------------------------------------------------------------------
+  | REMOVE DUPLICATES
+  |--------------------------------------------------------------------------
+  */
+
+  const uniqueAnime =
+    Array.from(
+      new Map(
+        allAnime.map(
+          anime => [
+            anime.id,
+            anime
+          ]
+        )
+      ).values()
+    );
+
+  return uniqueAnime.slice(
+    0,
+    MAX_ANIME
+  );
 }
 
 /*
@@ -104,20 +234,25 @@ async function getReleasingAnime() {
 |--------------------------------------------------------------------------
 */
 
-async function saveToR2(id, data) {
+async function saveToR2(
+  id,
+  data
+) {
 
-  const body = JSON.stringify(
-    data,
-    null,
-    2
-  );
+  const body =
+    JSON.stringify(
+      data,
+      null,
+      2
+    );
 
   await client.send(
     new PutObjectCommand({
 
       Bucket: bucket,
 
-      Key: `anime/${id}.json`,
+      Key:
+        `anime/${id}.json`,
 
       Body: body,
 
@@ -126,6 +261,7 @@ async function saveToR2(id, data) {
 
       CacheControl:
         "public, max-age=3600"
+
     })
   );
 }
@@ -140,33 +276,44 @@ async function getOldAnimeFiles() {
 
   const result = [];
 
-  let continuationToken = undefined;
+  let continuationToken =
+    undefined;
 
   do {
 
-    const response = await client.send(
-      new ListObjectsV2Command({
+    const response =
+      await client.send(
 
-        Bucket: bucket,
+        new ListObjectsV2Command({
 
-        Prefix: "anime/",
+          Bucket: bucket,
 
-        ContinuationToken:
-          continuationToken
+          Prefix: "anime/",
 
-      })
-    );
+          ContinuationToken:
+            continuationToken
 
-    if (response.Contents) {
+        })
 
-      for (const object of response.Contents) {
+      );
+
+    if (
+      response.Contents
+    ) {
+
+      for (
+        const object
+        of response.Contents
+      ) {
 
         if (
           object.Key &&
           object.Key.endsWith(".json")
         ) {
 
-          result.push(object.Key);
+          result.push(
+            object.Key
+          );
 
         }
 
@@ -177,7 +324,9 @@ async function getOldAnimeFiles() {
     continuationToken =
       response.NextContinuationToken;
 
-  } while (continuationToken);
+  } while (
+    continuationToken
+  );
 
   return result;
 }
@@ -192,26 +341,38 @@ async function deleteOldFiles(
   animeList
 ) {
 
-  const currentIds = new Set(
-    animeList.map(
-      anime => String(anime.id)
-    )
-  );
+  const currentIds =
+    new Set(
+      animeList.map(
+        anime =>
+          String(anime.id)
+      )
+    );
 
   const oldFiles =
     await getOldAnimeFiles();
 
   const filesToDelete =
-    oldFiles.filter(key => {
+    oldFiles.filter(
+      key => {
 
-      const filename =
-        key
-          .replace("anime/", "")
-          .replace(".json", "");
+        const filename =
+          key
+            .replace(
+              "anime/",
+              ""
+            )
+            .replace(
+              ".json",
+              ""
+            );
 
-      return !currentIds.has(filename);
+        return !currentIds.has(
+          filename
+        );
 
-    });
+      }
+    );
 
   if (
     filesToDelete.length === 0
@@ -222,12 +383,17 @@ async function deleteOldFiles(
     );
 
     return;
-
   }
 
   console.log(
     `Deleting ${filesToDelete.length} old anime files...`
   );
+
+  /*
+  |--------------------------------------------------------------------------
+  | R2 DELETE LIMIT = 1000
+  |--------------------------------------------------------------------------
+  */
 
   for (
     let i = 0;
@@ -242,6 +408,7 @@ async function deleteOldFiles(
       );
 
     await client.send(
+
       new DeleteObjectsCommand({
 
         Bucket: bucket,
@@ -250,12 +417,15 @@ async function deleteOldFiles(
 
           Objects:
             batch.map(
-              Key => ({ Key })
+              key => ({
+                Key: key
+              })
             )
 
         }
 
       })
+
     );
 
     console.log(
@@ -273,24 +443,39 @@ async function deleteOldFiles(
 async function main() {
 
   console.log(
-    "Getting currently airing anime..."
+    "================================="
   );
+
+  console.log(
+    "Starting Anime Cache Update"
+  );
+
+  console.log(
+    "================================="
+  );
+
+  /*
+  |--------------------------------------------------------------------------
+  | GET ANIME
+  |--------------------------------------------------------------------------
+  */
 
   const animeList =
     await getReleasingAnime();
 
   console.log(
-    `Found ${animeList.length} anime.`
+    `Found ${animeList.length} anime with next episode.`
   );
 
   /*
   |--------------------------------------------------------------------------
-  | UPDATE CURRENT ANIME
+  | UPDATE R2
   |--------------------------------------------------------------------------
   */
 
   for (
-    const anime of animeList
+    const anime
+    of animeList
   ) {
 
     try {
@@ -305,10 +490,12 @@ async function main() {
       );
 
       console.log(
-        `Anime ${anime.id} updated`
+        `Anime ${anime.id} updated.`
       );
 
-    } catch (error) {
+    } catch (
+      error
+    ) {
 
       console.error(
         `Anime ${anime.id} failed:`,
@@ -320,7 +507,7 @@ async function main() {
 
   /*
   |--------------------------------------------------------------------------
-  | DELETE OLD ANIME
+  | DELETE OLD FILES
   |--------------------------------------------------------------------------
   */
 
@@ -329,7 +516,15 @@ async function main() {
   );
 
   console.log(
+    "================================="
+  );
+
+  console.log(
     "Anime cache update finished."
+  );
+
+  console.log(
+    "================================="
   );
 }
 
