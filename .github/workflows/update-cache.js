@@ -27,7 +27,7 @@ const client = new S3Client({
 
 const query = `
 query {
-  Page(page: 1, perPage: 50) {
+  Page(page: 1, perPage: 500) {
     media(
       type: ANIME
       status: RELEASING
