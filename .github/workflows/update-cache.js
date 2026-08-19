@@ -3,30 +3,19 @@ const {
   PutObjectCommand
 } = require("@aws-sdk/client-s3");
 
-const endpoint =
-  process.env.R2_ENDPOINT;
+const endpoint = process.env.R2_ENDPOINT;
+const bucket = process.env.R2_BUCKET;
+const accessKeyId = process.env.R2_ACCESS_KEY_ID;
+const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
 
-const bucket =
-  process.env.R2_BUCKET;
-
-const accessKeyId =
-  process.env.R2_ACCESS_KEY_ID;
-
-const secretAccessKey =
-  process.env.R2_SECRET_ACCESS_KEY;
-
-const client =
-  new S3Client({
-    region: "auto",
-
-    endpoint,
-
-    credentials: {
-      accessKeyId,
-      secretAccessKey
-    }
-  });
-
+const client = new S3Client({
+  region: "auto",
+  endpoint,
+  credentials: {
+    accessKeyId,
+    secretAccessKey
+  }
+});
 
 /*
 |--------------------------------------------------------------------------
@@ -35,98 +24,77 @@ const client =
 */
 
 const query = `
-query ($id: Int) {
+query {
+  Page(page: 1, perPage: 50) {
+    media(
+      type: ANIME
+      status: RELEASING
+      sort: POPULARITY_DESC
+    ) {
+      id
 
-  Media(id: $id, type: ANIME) {
+      title {
+        romaji
+        english
+        native
+      }
 
-    id
+      status
+      episodes
+      duration
 
-    title {
-      romaji
-      english
-      native
+      nextAiringEpisode {
+        airingAt
+        episode
+      }
     }
-
-    status
-
-    episodes
-
-    duration
-
-    nextAiringEpisode {
-      airingAt
-      episode
-    }
-
   }
-
 }
 `;
 
-
 /*
 |--------------------------------------------------------------------------
-| GET ANILIST DATA
+| GET RELEASING ANIME
 |--------------------------------------------------------------------------
 */
 
-async function getAnime(id) {
+async function getReleasingAnime() {
 
-  const response =
-    await fetch(
-      "https://graphql.anilist.co",
-      {
-        method: "POST",
+  const response = await fetch(
+    "https://graphql.anilist.co",
+    {
+      method: "POST",
 
-        headers: {
-          "Content-Type":
-            "application/json"
-        },
+      headers: {
+        "Content-Type": "application/json"
+      },
 
-        body: JSON.stringify({
-
-          query,
-
-          variables: {
-            id: Number(id)
-          }
-
-        })
-
-      }
-    );
-
+      body: JSON.stringify({
+        query
+      })
+    }
+  );
 
   if (!response.ok) {
-
     throw new Error(
       `AniList HTTP ${response.status}`
     );
-
   }
 
-
-  const json =
-    await response.json();
-
+  const json = await response.json();
 
   if (
     json.errors ||
     !json.data ||
-    !json.data.Media
+    !json.data.Page
   ) {
-
     throw new Error(
-      `Anime ${id} not found`
+      "AniList returned invalid data"
     );
-
   }
 
-
-  return json.data.Media;
-
+  return json.data.Page.media;
 }
-
 
 /*
 |--------------------------------------------------------------------------
@@ -134,21 +102,15 @@ async function getAnime(id) {
 |--------------------------------------------------------------------------
 */
 
-async function saveToR2(
-  id,
-  data
-) {
+async function saveToR2(id, data) {
 
-  const body =
-    JSON.stringify(
-      data,
-      null,
-      2
-    );
-
+  const body = JSON.stringify(
+    data,
+    null,
+    2
+  );
 
   await client.send(
-
     new PutObjectCommand({
 
       Bucket: bucket,
@@ -163,32 +125,9 @@ async function saveToR2(
 
       CacheControl:
         "public, max-age=3600"
-
     })
-
   );
-
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| ANIME IDS
-|--------------------------------------------------------------------------
-|
-| Tạm thời dùng các ID đang cần.
-| Sau khi hệ thống ổn định,
-| ta sẽ tự động lấy danh sách.
-|
-|--------------------------------------------------------------------------
-*/
-
-const animeIds = [
-
-  21
-
-];
-
 
 /*
 |--------------------------------------------------------------------------
@@ -199,61 +138,54 @@ const animeIds = [
 async function main() {
 
   console.log(
-    `Updating ${animeIds.length} anime...`
+    "Getting currently airing anime..."
   );
 
+  const animeList =
+    await getReleasingAnime();
+
+  console.log(
+    `Found ${animeList.length} anime.`
+  );
 
   for (
-    const id of animeIds
+    const anime of animeList
   ) {
 
     try {
 
       console.log(
-        `Updating anime ${id}...`
+        `Updating anime ${anime.id}...`
       );
 
-
-      const anime =
-        await getAnime(id);
-
-
       await saveToR2(
-        id,
+        anime.id,
         anime
       );
 
-
       console.log(
-        `Anime ${id} updated`
+        `Anime ${anime.id} updated`
       );
-
 
     } catch (error) {
 
       console.error(
-        `Anime ${id} failed:`,
+        `Anime ${anime.id} failed:`,
         error.message
       );
 
     }
-
   }
-
 
   console.log(
     "Anime cache update finished."
   );
-
 }
-
 
 main().catch(
   error => {
 
-    console.error(
-      error
-    );
+    console.error(error);
 
     process.exit(1);
 
