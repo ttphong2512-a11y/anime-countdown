@@ -1,23 +1,37 @@
 # ============================================================
-# WHY2YUE — R2 ANIME CACHE UPDATE
+# WHY2YUE — R2 ANIME CACHE
 # ============================================================
 #
-# AniList
-#    ↓
-# GitHub Actions
-#    ↓
+# anime-ids.json
+#       ↓
 # update-cache.js
-#    ↓
+#       ↓
+# AniList
+#       ↓
 # Cloudflare R2
 #
-# Mỗi anime:
+# Chỉ cập nhật những AniList ID có trong anime-ids.json.
+#
+# Ví dụ:
+#
+# [
+#   {
+#     "id": 21,
+#     "name": "ONE PIECE"
+#   },
+#   {
+#     "id": 196017,
+#     "name": "Anime 196017"
+#   }
+# ]
+#
+# R2:
 #
 # anime/21.json
 # anime/196017.json
-# anime/16498.json
-# ...
 #
 # ============================================================
+
 
 name: Update Anime Cache
 
@@ -29,7 +43,17 @@ name: Update Anime Cache
 on:
 
   # ----------------------------------------------------------
-  # TỰ ĐỘNG MỖI 3 GIỜ
+  # TỰ ĐỘNG
+  # ----------------------------------------------------------
+  #
+  # Chạy mỗi 3 giờ.
+  #
+  # 00:17
+  # 03:17
+  # 06:17
+  # 09:17
+  # ...
+  #
   # ----------------------------------------------------------
 
   schedule:
@@ -45,16 +69,12 @@ on:
 
 
 # ============================================================
-# CHỐNG CHẠY CHỒNG
+# PERMISSIONS
 # ============================================================
 
-concurrency:
+permissions:
 
-  group:
-    why2yue-anime-cache
-
-  cancel-in-progress:
-    false
+  contents: write
 
 
 # ============================================================
@@ -63,20 +83,10 @@ concurrency:
 
 jobs:
 
-  update-cache:
+  update-anime-cache:
 
     runs-on:
       ubuntu-latest
-
-
-    # ========================================================
-    # PERMISSIONS
-    # ========================================================
-
-    permissions:
-
-      contents:
-        read
 
 
     steps:
@@ -112,26 +122,41 @@ jobs:
       # ======================================================
       # 3. INSTALL AWS SDK
       # ======================================================
+      #
+      # update-cache.js sử dụng:
+      #
+      # @aws-sdk/client-s3
+      #
+      # để ghi dữ liệu vào Cloudflare R2.
+      #
+      # ======================================================
 
       - name:
-          Install R2 SDK
+          Install dependencies
 
-        run:
+        run: |
+
           npm install --no-save @aws-sdk/client-s3
 
 
       # ======================================================
       # 4. UPDATE R2
       # ======================================================
+      #
+      # Đọc:
+      #
+      # anime-ids.json
+      #
+      # Sau đó:
+      #
+      # AniList → R2
+      #
+      # ======================================================
 
       - name:
-          Update R2 anime cache
+          Update Cloudflare R2
 
         env:
-
-          # --------------------------------------------------
-          # R2 credentials
-          # --------------------------------------------------
 
           R2_ACCESS_KEY_ID:
             ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -139,53 +164,73 @@ jobs:
           R2_SECRET_ACCESS_KEY:
             ${{ secrets.R2_SECRET_ACCESS_KEY }}
 
-
-          # --------------------------------------------------
-          # R2 endpoint
-          # --------------------------------------------------
-
           R2_ENDPOINT:
             https://5cdad020d02db4b8aa5b7b96fe8282ce.r2.cloudflarestorage.com
-
-
-          # --------------------------------------------------
-          # Bucket
-          # --------------------------------------------------
 
           R2_BUCKET:
             ogeview-anime
 
 
-          # --------------------------------------------------
-          # PINNED ANIME
-          #
-          # Các ID này LUÔN được cập nhật.
-          #
-          # Không phụ thuộc:
-          # top anime
-          # popularity
-          # start date
-          # page AniList
-          #
-          # Test hiện tại:
-          # One Piece = 21
-          # Anime mẫu = 196017
-          #
-          # Khi thêm anime mới:
-          # chỉ cần thêm ID vào đây MỘT LẦN.
-          #
-          # Ví dụ:
-          #
-          # 21,196017,16498,1535
-          #
-          # Sau khi file tồn tại trên R2,
-          # những lần sau script tự phát hiện file đó.
-          # --------------------------------------------------
-
-          ANIME_IDS:
-            "21,196017"
-
-
         run:
 
-          node .github/workflows/update-cache.js
+          node update-cache.js
+
+
+      # ======================================================
+      # 5. KIỂM TRA THAY ĐỔI anime-ids.json
+      # ======================================================
+      #
+      # update-cache.js có thể tự cập nhật:
+      #
+      # "Anime 196017"
+      #
+      # thành tên thật lấy từ AniList.
+      #
+      # ======================================================
+
+      - name:
+          Check anime list changes
+
+        id:
+          check_changes
+
+        run: |
+
+          if git diff --quiet -- anime-ids.json; then
+
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+
+          else
+
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+
+          fi
+
+
+      # ======================================================
+      # 6. COMMIT TÊN ANIME MỚI
+      # ======================================================
+      #
+      # Chỉ commit nếu anime-ids.json thực sự thay đổi.
+      #
+      # Không tạo commit vô ích mỗi lần workflow chạy.
+      #
+      # ======================================================
+
+      - name:
+          Commit updated anime names
+
+        if:
+          steps.check_changes.outputs.changed == 'true'
+
+        run: |
+
+          git config user.name "github-actions[bot]"
+
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add anime-ids.json
+
+          git commit -m "Update anime names"
+
+          git push
