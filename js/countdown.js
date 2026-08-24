@@ -1,55 +1,134 @@
 <script>
-(function(){
+(function () {
 
 "use strict";
 
 /* =========================================================
-   WHY2YUE COUNTDOWN ENGINE
+   WHY2YUE — COUNTDOWN ENGINE
+   COUNTDOWN.JS
    PART 1/3
-   DATA + R2 + STATE
+
+   NHIỆM VỤ:
+
+   Blogger
+      ↓
+   AniList ID
+      ↓
+   Cloudflare R2
+      ↓
+   /anime/{ID}.json
+      ↓
+   dữ liệu anime
+      ↓
+   state nội bộ
+
+   KHÔNG nhập URL JSON cho từng anime.
+
+   Chỉ cần:
+
+   <div
+      id="anime-countdown"
+      data-anilist-id="21"
+   ></div>
+
+   ========================================================= */
+
+
+/* =========================================================
+   1. GLOBAL ENGINE
    ========================================================= */
 
 window.W2YCountdown =
 window.W2YCountdown || {};
 
-const W2Y = window.W2YCountdown;
+const W2Y =
+window.W2YCountdown;
 
 
 /* =========================================================
-   CONFIG
+   2. CONFIG
    ========================================================= */
 
 W2Y.config = {
 
+    /*
+     * R2 public URL.
+     *
+     * Không ghi /21.json ở đây.
+     *
+     * Engine tự tạo:
+     *
+     * /anime/21.json
+     * /anime/196017.json
+     * ...
+     */
+
+    r2Base:
+        "https://pub-fb649c225b4545dd8132b2744f70af24.r2.dev/anime",
+
+
+    /*
+     * Kiểm tra R2 mỗi 5 phút.
+     */
+
     refreshInterval:
         5 * 60 * 1000,
+
+
+    /*
+     * Timeout mỗi request.
+     */
 
     requestTimeout:
         15000,
 
+
+    /*
+     * Nếu R2 lỗi,
+     * dữ liệu localStorage cũ vẫn được dùng.
+     */
+
+    localStoragePrefix:
+        "w2y_anime_cache_",
+
+
+    /*
+     * Ngôn ngữ mặc định.
+     */
+
     defaultLanguage:
         "vi",
 
-    languageURL:
-        "https://ttphong2512-a11y.github.io/anime-countdown/lang/"
+
+    /*
+     * Múi giờ Việt Nam.
+     */
+
+    vietnamTimezone:
+        "Asia/Ho_Chi_Minh"
 
 };
 
 
 /* =========================================================
-   ELEMENT
+   3. FIND CARD
    ========================================================= */
 
 W2Y.box =
-    document.getElementById(
-        "anime-countdown"
-    );
+document.getElementById(
+    "anime-countdown"
+);
 
 
-if(!W2Y.box){
+/*
+ * Nếu trang chưa có countdown
+ * thì không làm gì.
+ */
+
+if (!W2Y.box) {
 
     console.warn(
-        "WHY2YUE: #anime-countdown not found."
+        "WHY2YUE: #anime-countdown không tồn tại."
     );
 
     return;
@@ -58,29 +137,192 @@ if(!W2Y.box){
 
 
 /* =========================================================
-   ANIME ID
+   4. GET ANILIST ID
    ========================================================= */
 
 W2Y.animeId =
-    String(
-        W2Y.box.dataset.anilistId || ""
-    ).trim();
+String(
+    W2Y.box.dataset.anilistId || ""
+).trim();
+
+
+/*
+ * AniList ID bắt buộc.
+ */
+
+if (!W2Y.animeId) {
+
+    console.error(
+        "WHY2YUE: Thiếu data-anilist-id."
+    );
+
+    W2Y.box.setAttribute(
+        "data-w2y-error",
+        "missing-anilist-id"
+    );
+
+    return;
+
+}
 
 
 /* =========================================================
-   LANGUAGE
+   5. VALIDATE ID
+   ========================================================= */
+
+if (
+    !/^\d+$/.test(
+        W2Y.animeId
+    )
+) {
+
+    console.error(
+        "WHY2YUE: AniList ID không hợp lệ:",
+        W2Y.animeId
+    );
+
+    return;
+
+}
+
+
+/* =========================================================
+   6. ELEMENT HELPER
+   ========================================================= */
+
+W2Y.$ =
+function (selector) {
+
+    return W2Y.box.querySelector(
+        selector
+    );
+
+};
+
+
+/* =========================================================
+   7. CARD ELEMENTS
+   ========================================================= */
+
+W2Y.elements = {
+
+    current:
+        W2Y.$(
+            "[data-w2y-current]"
+        ),
+
+    next:
+        W2Y.$(
+            "[data-w2y-next]"
+        ),
+
+    timer:
+        W2Y.$(
+            "[data-w2y-timer]"
+        ),
+
+    release:
+        W2Y.$(
+            "[data-w2y-release]"
+        ),
+
+    status:
+        W2Y.$(
+            "[data-w2y-status]"
+        ),
+
+    progress:
+        W2Y.$(
+            "[data-w2y-progress]"
+        )
+
+};
+
+
+/* =========================================================
+   8. FALLBACK ELEMENT ID
+   =========================================================
+   
+   Cho phép card cũ dùng ID:
+
+   #w2y-current
+   #w2y-next
+   #w2y-timer
+   #w2y-release
+   #w2y-count-status
+   #w2y-progress-bar
+
+   ========================================================= */
+
+if (!W2Y.elements.current) {
+
+    W2Y.elements.current =
+    document.getElementById(
+        "w2y-current"
+    );
+
+}
+
+if (!W2Y.elements.next) {
+
+    W2Y.elements.next =
+    document.getElementById(
+        "w2y-next"
+    );
+
+}
+
+if (!W2Y.elements.timer) {
+
+    W2Y.elements.timer =
+    document.getElementById(
+        "w2y-timer"
+    );
+
+}
+
+if (!W2Y.elements.release) {
+
+    W2Y.elements.release =
+    document.getElementById(
+        "w2y-release"
+    );
+
+}
+
+if (!W2Y.elements.status) {
+
+    W2Y.elements.status =
+    document.getElementById(
+        "w2y-count-status"
+    );
+
+}
+
+if (!W2Y.elements.progress) {
+
+    W2Y.elements.progress =
+    document.getElementById(
+        "w2y-progress-bar"
+    );
+
+}
+
+
+/* =========================================================
+   9. LANGUAGE
    ========================================================= */
 
 W2Y.lang =
-    W2Y.box.dataset.lang ||
-    document.documentElement
-        .getAttribute("lang") ||
-    localStorage.getItem("lang") ||
-    W2Y.config.defaultLanguage;
+W2Y.box.dataset.lang ||
+document.documentElement
+    .getAttribute("lang") ||
+localStorage.getItem("lang") ||
+W2Y.config.defaultLanguage;
 
 
 /* =========================================================
-   SUPPORTED LANGUAGES
+   10. SUPPORTED LANGUAGES
    ========================================================= */
 
 W2Y.languages = [
@@ -99,142 +341,257 @@ W2Y.languages = [
 ];
 
 
-if(
+if (
     !W2Y.languages.includes(
         W2Y.lang
     )
-){
+) {
 
     W2Y.lang =
-        W2Y.config.defaultLanguage;
+    W2Y.config.defaultLanguage;
 
 }
 
 
 /* =========================================================
-   R2 URL
+   11. CREATE R2 URL
    ========================================================= */
 
 W2Y.getR2Url =
-function(){
+function () {
 
-    const dataURL =
-        W2Y.box.dataset.r2Url;
+    /*
+     * Cho phép card override:
+     *
+     * data-r2-url="..."
+     *
+     * Nhưng bình thường KHÔNG cần.
+     */
+
+    const custom =
+    W2Y.box.dataset.r2Url;
 
 
-    if(
-        dataURL &&
-        dataURL.trim()
-    ){
+    if (
+        custom &&
+        custom.trim()
+    ) {
 
-        return dataURL.trim();
+        return custom.trim();
 
     }
 
 
     /*
-     * Nếu muốn dùng ID tự động:
+     * URL mặc định:
      *
-     * data-r2-base="https://xxx.r2.dev/anime/"
-     *
+     * https://...r2.dev/anime/21.json
      */
 
-    const base =
-        W2Y.box.dataset.r2Base;
-
-
-    if(
-        base &&
-        base.trim() &&
-        W2Y.animeId
-    ){
-
-        return (
-            base.replace(/\/+$/,"") +
-            "/" +
-            W2Y.animeId +
-            ".json"
-        );
-
-    }
-
-
-    return "";
+    return (
+        W2Y.config.r2Base
+            .replace(/\/+$/, "") +
+        "/" +
+        encodeURIComponent(
+            W2Y.animeId
+        ) +
+        ".json"
+    );
 
 };
 
 
 /* =========================================================
-   FETCH WITH TIMEOUT
+   12. LOCAL CACHE KEY
    ========================================================= */
 
-W2Y.fetchJSON =
-async function(url){
+W2Y.getStorageKey =
+function () {
 
-    const controller =
-        new AbortController();
+    return (
+        W2Y.config.localStoragePrefix +
+        W2Y.animeId
+    );
+
+};
 
 
-    const timeout =
-        setTimeout(
-            function(){
+/* =========================================================
+   13. SAVE LOCAL CACHE
+   ========================================================= */
 
-                controller.abort();
+W2Y.saveLocal =
+function (data) {
 
-            },
-            W2Y.config.requestTimeout
+    try {
+
+        localStorage.setItem(
+
+            W2Y.getStorageKey(),
+
+            JSON.stringify({
+
+                savedAt:
+                    Date.now(),
+
+                data:
+                    data
+
+            })
+
+        );
+
+    }
+    catch (error) {
+
+        console.warn(
+            "WHY2YUE: Không thể lưu local cache.",
+            error
+        );
+
+    }
+
+};
+
+
+/* =========================================================
+   14. LOAD LOCAL CACHE
+   ========================================================= */
+
+W2Y.loadLocal =
+function () {
+
+    try {
+
+        const raw =
+        localStorage.getItem(
+            W2Y.getStorageKey()
         );
 
 
-    try{
+        if (!raw) {
+
+            return null;
+
+        }
+
+
+        const parsed =
+        JSON.parse(raw);
+
+
+        if (
+            !parsed ||
+            !parsed.data
+        ) {
+
+            return null;
+
+        }
+
+
+        return parsed.data;
+
+    }
+    catch (error) {
+
+        console.warn(
+            "WHY2YUE: Local cache không hợp lệ.",
+            error
+        );
+
+        return null;
+
+    }
+
+};
+
+
+/* =========================================================
+   15. FETCH WITH TIMEOUT
+   ========================================================= */
+
+W2Y.fetchJSON =
+async function (url) {
+
+    const controller =
+    new AbortController();
+
+
+    const timeout =
+    setTimeout(
+
+        function () {
+
+            controller.abort();
+
+        },
+
+        W2Y.config.requestTimeout
+
+    );
+
+
+    try {
+
+        /*
+         * Query timestamp để tránh browser/CDN
+         * giữ bản JSON cũ.
+         */
 
         const separator =
-            url.includes("?")
-                ? "&"
-                : "?";
+        url.includes("?")
+            ? "&"
+            : "?";
 
 
-        const finalURL =
-            url +
-            separator +
-            "w2y=" +
-            Date.now();
+        const requestURL =
+        url +
+        separator +
+        "_w2y=" +
+        Date.now();
 
 
         const response =
-            await fetch(
-                finalURL,
-                {
+        await fetch(
 
-                    method:
-                        "GET",
+            requestURL,
 
-                    cache:
-                        "no-store",
+            {
 
-                    signal:
-                        controller.signal,
+                method:
+                    "GET",
 
-                    headers:{
+                cache:
+                    "no-store",
 
-                        "Cache-Control":
-                            "no-cache",
+                signal:
+                    controller.signal,
 
-                        "Pragma":
-                            "no-cache"
+                headers: {
 
-                    }
+                    "Accept":
+                        "application/json",
+
+                    "Cache-Control":
+                        "no-cache",
+
+                    "Pragma":
+                        "no-cache"
 
                 }
-            );
+
+            }
+
+        );
 
 
-        if(
+        if (
             !response.ok
-        ){
+        ) {
 
             throw new Error(
-                "HTTP " +
+                "R2 HTTP " +
                 response.status
             );
 
@@ -242,16 +599,36 @@ async function(url){
 
 
         const data =
-            await response.json();
+        await response.json();
 
 
-        if(
+        if (
             !data ||
             typeof data !== "object"
-        ){
+        ) {
 
             throw new Error(
-                "Invalid JSON"
+                "JSON R2 không hợp lệ."
+            );
+
+        }
+
+
+        /*
+         * Kiểm tra ID.
+         *
+         * Nếu trang là ID 21 mà R2 trả
+         * JSON của ID khác → từ chối.
+         */
+
+        if (
+            data.id !== undefined &&
+            String(data.id) !==
+            W2Y.animeId
+        ) {
+
+            throw new Error(
+                "R2 trả sai AniList ID."
             );
 
         }
@@ -259,8 +636,8 @@ async function(url){
 
         return data;
 
-
-    }finally{
+    }
+    finally {
 
         clearTimeout(
             timeout
@@ -272,20 +649,20 @@ async function(url){
 
 
 /* =========================================================
-   LOAD R2
+   16. LOAD R2
    ========================================================= */
 
 W2Y.loadR2 =
-async function(){
+async function () {
 
     const url =
-        W2Y.getR2Url();
+    W2Y.getR2Url();
 
 
-    if(!url){
+    if (!url) {
 
         throw new Error(
-            "R2 URL is not configured."
+            "Không tạo được R2 URL."
         );
 
     }
@@ -299,144 +676,74 @@ async function(){
 
 
 /* =========================================================
-   EMBEDDED FALLBACK
-   ========================================================= */
-
-W2Y.getEmbedded =
-function(){
-
-    const raw =
-        W2Y.box.dataset.anilistData;
-
-
-    if(!raw){
-
-        return null;
-
-    }
-
-
-    try{
-
-        return JSON.parse(
-            raw
-        );
-
-    }catch(error){
-
-        console.warn(
-            "WHY2YUE: Invalid embedded data.",
-            error
-        );
-
-        return null;
-
-    }
-
-};
-
-
-/* =========================================================
-   LOAD BEST DATA
-   ========================================================= */
-
-W2Y.loadAnime =
-async function(){
-
-    try{
-
-        const r2 =
-            await W2Y.loadR2();
-
-
-        if(r2){
-
-            W2Y.lastSource =
-                "R2";
-
-            return r2;
-
-        }
-
-    }catch(error){
-
-        console.warn(
-            "WHY2YUE: R2 unavailable.",
-            error
-        );
-
-    }
-
-
-    const embedded =
-        W2Y.getEmbedded();
-
-
-    if(embedded){
-
-        W2Y.lastSource =
-            "embedded";
-
-        return embedded;
-
-    }
-
-
-    return null;
-
-};
-
-
-/* =========================================================
-   NORMALIZE ANIME
+   17. NORMALIZE
    ========================================================= */
 
 W2Y.normalize =
-function(anime){
+function (data) {
 
-    if(
-        !anime ||
-        typeof anime !== "object"
-    ){
+    if (
+        !data ||
+        typeof data !== "object"
+    ) {
 
         return null;
 
     }
+
+
+    const episodes =
+    Number(data.episodes);
+
+
+    const duration =
+    Number(data.duration);
 
 
     const result = {
 
         id:
-            Number(anime.id) || 0,
+            Number(data.id) || 0,
 
         title:
-            anime.title || {},
+            data.title || {},
 
         status:
-            anime.status || "UNKNOWN",
+            String(
+                data.status || "UNKNOWN"
+            ).toUpperCase(),
 
         episodes:
             Number.isFinite(
-                Number(anime.episodes)
+                episodes
             )
-                ? Number(anime.episodes)
+                ? episodes
                 : null,
 
         duration:
             Number.isFinite(
-                Number(anime.duration)
+                duration
             )
-                ? Number(anime.duration)
+                ? duration
                 : null,
 
         startDate:
-            anime.startDate || null,
+            data.startDate || null,
 
         endDate:
-            anime.endDate || null,
+            data.endDate || null,
+
+        season:
+            data.season || null,
+
+        seasonYear:
+            data.seasonYear || null,
+
+        updatedAt:
+            Number(data.updatedAt) || null,
 
         nextAiringEpisode:
-            anime.nextAiringEpisode || null
+            data.nextAiringEpisode || null
 
     };
 
@@ -447,201 +754,24 @@ function(anime){
 
 
 /* =========================================================
-   GET TITLE
-   ========================================================= */
-
-W2Y.getTitle =
-function(anime){
-
-    if(!anime){
-
-        return "";
-
-    }
-
-
-    return (
-
-        anime.title?.english ||
-
-        anime.title?.romaji ||
-
-        anime.title?.native ||
-
-        "Anime"
-
-    );
-
-};
-
-
-/* =========================================================
-   GET START TIMESTAMP
-   ========================================================= */
-
-W2Y.getStartTimestamp =
-function(anime){
-
-    const start =
-        anime?.startDate;
-
-
-    if(
-        !start ||
-        !start.year ||
-        !start.month ||
-        !start.day
-    ){
-
-        return null;
-
-    }
-
-
-    /*
-     * AniList startDate không có giờ.
-     *
-     * Dùng UTC để tránh việc thiết bị
-     * ở múi giờ khác làm ngày bị lệch.
-     */
-
-    const timestamp =
-        Date.UTC(
-            Number(start.year),
-            Number(start.month) - 1,
-            Number(start.day)
-        );
-
-
-    return Number.isFinite(
-        timestamp
-    )
-        ? timestamp
-        : null;
-
-};
-
-
-/* =========================================================
-   GET END TIMESTAMP
-   ========================================================= */
-
-W2Y.getEndTimestamp =
-function(anime){
-
-    const end =
-        anime?.endDate;
-
-
-    if(
-        !end ||
-        !end.year ||
-        !end.month ||
-        !end.day
-    ){
-
-        return null;
-
-    }
-
-
-    const timestamp =
-        Date.UTC(
-            Number(end.year),
-            Number(end.month) - 1,
-            Number(end.day)
-        );
-
-
-    return Number.isFinite(
-        timestamp
-    )
-        ? timestamp
-        : null;
-
-};
-
-
-/* =========================================================
-   DETERMINE STATE
-   ========================================================= */
-
-W2Y.getState =
-function(anime){
-
-    if(!anime){
-
-        return "UNKNOWN";
-
-    }
-
-
-    const status =
-        String(
-            anime.status || ""
-        ).toUpperCase();
-
-
-    /*
-     * Đã hoàn thành
-     */
-
-    if(
-        status === "FINISHED"
-    ){
-
-        return "FINISHED";
-
-    }
-
-
-    /*
-     * Chưa phát sóng
-     */
-
-    if(
-        status === "NOT_YET_RELEASED"
-    ){
-
-        return "NOT_YET";
-
-    }
-
-
-    /*
-     * Đang phát sóng
-     */
-
-    if(
-        status === "RELEASING"
-    ){
-
-        return "RELEASING";
-
-    }
-
-
-    /*
-     * Các trạng thái khác
-     */
-
-    return "UNKNOWN";
-
-};
-
-
-/* =========================================================
-   VALID NEXT AIRING
+   18. VALIDATE NEXT AIRING
    ========================================================= */
 
 W2Y.getNextAiring =
-function(anime){
+function (anime) {
+
+    if (!anime) {
+
+        return null;
+
+    }
+
 
     const next =
-        anime?.nextAiringEpisode;
+    anime.nextAiringEpisode;
 
 
-    if(!next){
+    if (!next) {
 
         return null;
 
@@ -649,26 +779,19 @@ function(anime){
 
 
     const episode =
-        Number(
-            next.episode
-        );
+    Number(next.episode);
 
 
     const airingAt =
-        Number(
-            next.airingAt
-        );
+    Number(next.airingAt);
 
 
-    if(
-        !Number.isFinite(
-            episode
-        ) ||
-        !Number.isFinite(
-            airingAt
-        ) ||
+    if (
+        !Number.isFinite(episode) ||
+        episode <= 0 ||
+        !Number.isFinite(airingAt) ||
         airingAt <= 0
-    ){
+    ) {
 
         return null;
 
@@ -692,7 +815,7 @@ function(anime){
 
 
 /* =========================================================
-   PUBLIC STATE
+   19. STATE
    ========================================================= */
 
 W2Y.state = {
@@ -700,22 +823,28 @@ W2Y.state = {
     anime:
         null,
 
-    language:
+    source:
         null,
 
-    currentState:
-        "UNKNOWN",
-
-    nextAiring:
+    lastDataSignature:
         null,
 
-    timer:
+    nextAiringSignature:
+        null,
+
+    countdownTarget:
+        null,
+
+    countdownTimer:
         null,
 
     refreshTimer:
         null,
 
     refreshing:
+        false,
+
+    waitingForR2AfterAir:
         false,
 
     destroyed:
@@ -725,67 +854,81 @@ W2Y.state = {
 
 
 /* =========================================================
-   PART 1 READY
+   20. PART 1 READY
    ========================================================= */
 
 W2Y.part1Ready =
-    true;
+true;
 
 
 })();
 </script>
 
+
 <script>
-(function(){
+(function () {
 
 "use strict";
 
 const W2Y =
-    window.W2YCountdown;
+window.W2YCountdown;
 
 
 /* =========================================================
-   WHY2YUE COUNTDOWN ENGINE
+   WHY2YUE — COUNTDOWN ENGINE
    PART 2/3
-   LANGUAGE + FORMAT + RENDER
+
+   FORMAT + STATE + RENDER
    ========================================================= */
 
 
 /* =========================================================
-   LANGUAGE FALLBACK
+   1. TEXT
    ========================================================= */
 
-W2Y.defaultText = {
+W2Y.text = {
 
     loading:
         "Đang tải dữ liệu anime...",
 
+    connecting:
+        "Đang kết nối Cloudflare R2...",
+
     next:
         "Tập tiếp theo",
 
-    calculating:
-        "Đang tính thời gian...",
-
-    noSchedule:
-        "Chưa có lịch phát",
+    current:
+        "Tập hiện tại",
 
     completed:
         "Đã hoàn thành",
 
-    releasing:
-        "Đang phát sóng",
-
     notYet:
         "Chưa phát sóng",
+
+    releasing:
+        "Đang phát sóng",
 
     unknown:
         "Chưa xác định",
 
-    episodes:
-        "tập",
+    noSchedule:
+        "Chưa có lịch phát",
 
-    duration:
-        "phút/tập",
+    waiting:
+        "Đang chờ dữ liệu mới từ R2",
+
+    expired:
+        "Đã đến giờ phát",
+
+    updated:
+        "Đã cập nhật từ Cloudflare R2",
+
+    oldData:
+        "R2 tạm thời lỗi — đang dùng dữ liệu trước đó.",
+
+    noData:
+        "Chưa lấy được dữ liệu anime.",
 
     days:
         "ngày",
@@ -797,163 +940,57 @@ W2Y.defaultText = {
         "phút",
 
     seconds:
-        "giây",
-
-    expected:
-        "Dự kiến phát",
-
-    completedEpisodes:
-        "Số tập hoàn thành",
-
-    start:
-        "Ngày phát sóng",
-
-    end:
-        "Kết thúc",
-
-    noNext:
-        "Chưa có lịch tập tiếp theo"
+        "giây"
 
 };
 
 
 /* =========================================================
-   LOAD LANGUAGE
-   ========================================================= */
-
-W2Y.loadLanguage =
-async function(){
-
-    const fallback =
-        W2Y.defaultText;
-
-
-    try{
-
-        const url =
-            W2Y.config.languageURL +
-            encodeURIComponent(
-                W2Y.lang
-            ) +
-            ".json?t=" +
-            Date.now();
-
-
-        const response =
-            await fetch(
-                url,
-                {
-
-                    method:
-                        "GET",
-
-                    cache:
-                        "no-store"
-
-                }
-            );
-
-
-        if(
-            !response.ok
-        ){
-
-            throw new Error(
-                "Language HTTP " +
-                response.status
-            );
-
-        }
-
-
-        const data =
-            await response.json();
-
-
-        /*
-         * Nếu file ngôn ngữ chỉ có một phần
-         * text thì fallback phần còn thiếu.
-         */
-
-        return Object.assign(
-            {},
-            fallback,
-            data || {}
-        );
-
-
-    }catch(error){
-
-        console.warn(
-            "WHY2YUE: Language unavailable.",
-            error
-        );
-
-
-        return Object.assign(
-            {},
-            fallback
-        );
-
-    }
-
-};
-
-
-/* =========================================================
-   ESCAPE HTML
+   2. ESCAPE
    ========================================================= */
 
 W2Y.escapeHTML =
-function(value){
+function (value) {
 
-    if(
-        value === null ||
-        value === undefined
-    ){
-
-        return "";
-
-    }
-
-
-    return String(value)
-        .replace(
-            /&/g,
-            "&amp;"
-        )
-        .replace(
-            /</g,
-            "&lt;"
-        )
-        .replace(
-            />/g,
-            "&gt;"
-        )
-        .replace(
-            /"/g,
-            "&quot;"
-        )
-        .replace(
-            /'/g,
-            "&#039;"
-        );
+    return String(
+        value ?? ""
+    )
+    .replace(
+        /&/g,
+        "&amp;"
+    )
+    .replace(
+        /</g,
+        "&lt;"
+    )
+    .replace(
+        />/g,
+        "&gt;"
+    )
+    .replace(
+        /"/g,
+        "&quot;"
+    )
+    .replace(
+        /'/g,
+        "&#039;"
+    );
 
 };
 
 
 /* =========================================================
-   PAD NUMBER
+   3. PAD
    ========================================================= */
 
 W2Y.pad =
-function(number){
+function (value) {
 
     return String(
         Math.max(
             0,
             Math.floor(
-                Number(number) || 0
+                Number(value) || 0
             )
         )
     ).padStart(
@@ -965,777 +1002,862 @@ function(number){
 
 
 /* =========================================================
-   FORMAT COUNTDOWN
+   4. COUNTDOWN TEXT
    ========================================================= */
 
 W2Y.formatCountdown =
-function(distance){
+function (distance) {
 
     let seconds =
-        Math.max(
-            0,
-            Math.floor(
-                distance / 1000
-            )
-        );
+    Math.max(
+        0,
+        Math.floor(
+            distance / 1000
+        )
+    );
 
 
     const days =
-        Math.floor(
-            seconds / 86400
-        );
+    Math.floor(
+        seconds / 86400
+    );
 
 
     seconds %=
-        86400;
+    86400;
 
 
     const hours =
-        Math.floor(
-            seconds / 3600
-        );
+    Math.floor(
+        seconds / 3600
+    );
 
 
     seconds %=
-        3600;
+    3600;
 
 
     const minutes =
-        Math.floor(
-            seconds / 60
-        );
+    Math.floor(
+        seconds / 60
+    );
 
 
     seconds %=
-        60;
+    60;
 
 
-    const secs =
-        seconds;
+    return (
+        W2Y.pad(days) +
+        " ngày " +
 
+        W2Y.pad(hours) +
+        " giờ " +
 
-    const text =
-        W2Y.state.language ||
-        W2Y.defaultText;
+        W2Y.pad(minutes) +
+        " phút " +
 
-
-    return {
-
-        days:
-            days,
-
-        hours:
-            hours,
-
-        minutes:
-            minutes,
-
-        seconds:
-            secs,
-
-        html:
-
-            `<span class="w2y-time-number">${W2Y.pad(days)}</span>` +
-            `<span class="w2y-time-label">${W2Y.escapeHTML(text.days)}</span>` +
-
-            `<span class="w2y-time-number">${W2Y.pad(hours)}</span>` +
-            `<span class="w2y-time-label">${W2Y.escapeHTML(text.hours)}</span>` +
-
-            `<span class="w2y-time-number">${W2Y.pad(minutes)}</span>` +
-            `<span class="w2y-time-label">${W2Y.escapeHTML(text.minutes)}</span>` +
-
-            `<span class="w2y-time-number">${W2Y.pad(secs)}</span>` +
-            `<span class="w2y-time-label">${W2Y.escapeHTML(text.seconds)}</span>`
-
-    };
+        W2Y.pad(seconds) +
+        " giây"
+    );
 
 };
 
 
 /* =========================================================
-   FORMAT DATE
+   5. VIETNAM DATE
    ========================================================= */
 
-W2Y.formatDate =
-function(timestamp){
+W2Y.formatVietnamDate =
+function (timestamp) {
 
-    if(
-        !Number.isFinite(
-            Number(timestamp)
+    const date =
+    new Date(
+        Number(timestamp)
+    );
+
+
+    if (
+        Number.isNaN(
+            date.getTime()
         )
-    ){
+    ) {
 
         return "";
 
     }
 
 
-    const date =
-        new Date(
-            Number(timestamp)
-        );
+    return date.toLocaleString(
+
+        "vi-VN",
+
+        {
+
+            timeZone:
+                W2Y.config.vietnamTimezone,
+
+            weekday:
+                "long",
+
+            day:
+                "2-digit",
+
+            month:
+                "2-digit",
+
+            year:
+                "numeric",
+
+            hour:
+                "2-digit",
+
+            minute:
+                "2-digit",
+
+            second:
+                "2-digit",
+
+            hour12:
+                false
+
+        }
+
+    );
+
+};
 
 
-    if(
-        Number.isNaN(
-            date.getTime()
-        )
-    ){
+/* =========================================================
+   6. GET CURRENT EPISODE
+   =========================================================
 
-        return "";
+   Ví dụ:
+
+   nextAiringEpisode:
+       episode = 1175
+
+   → current = 1174
+
+   Khi AniList báo tập 1176:
+
+   → current = 1175
+
+   KHÔNG tự tăng khi countdown về 0.
+
+   ========================================================= */
+
+W2Y.getCurrentEpisode =
+function (anime) {
+
+    if (!anime) {
+
+        return null;
 
     }
 
 
     /*
-     * Hiển thị theo múi giờ của người xem.
-     *
-     * Người Việt → giờ Việt Nam.
-     * Người Nhật → giờ Nhật.
-     * Người Mỹ → giờ địa phương của họ.
+     * Anime đang có tập tiếp theo.
      */
 
-    try{
+    const next =
+    W2Y.getNextAiring(
+        anime
+    );
 
-        return date.toLocaleString(
-            W2Y.lang === "vi"
-                ? "vi-VN"
-                : W2Y.lang === "ja"
-                    ? "ja-JP"
-                    : W2Y.lang === "ko"
-                        ? "ko-KR"
-                        : W2Y.lang === "zh-CN"
-                            ? "zh-CN"
-                            : W2Y.lang,
-            {
 
-                weekday:
-                    "long",
+    if (next) {
 
-                day:
-                    "2-digit",
-
-                month:
-                    "2-digit",
-
-                year:
-                    "numeric",
-
-                hour:
-                    "2-digit",
-
-                minute:
-                    "2-digit"
-
-            }
+        return Math.max(
+            0,
+            next.episode - 1
         );
 
-    }catch(error){
-
-        return date.toLocaleString();
-
-    }
-
-};
-
-
-/* =========================================================
-   FORMAT DATE ONLY
-   ========================================================= */
-
-W2Y.formatDateOnly =
-function(timestamp){
-
-    if(
-        !Number.isFinite(
-            Number(timestamp)
-        )
-    ){
-
-        return "";
-
     }
 
 
-    const date =
-        new Date(
-            Number(timestamp)
-        );
+    /*
+     * Anime FINISHED.
+     */
 
+    if (
+        anime.status ===
+        "FINISHED"
+    ) {
 
-    if(
-        Number.isNaN(
-            date.getTime()
-        )
-    ){
-
-        return "";
-
-    }
-
-
-    try{
-
-        return date.toLocaleDateString(
-            W2Y.lang === "vi"
-                ? "vi-VN"
-                : W2Y.lang === "ja"
-                    ? "ja-JP"
-                    : W2Y.lang === "ko"
-                        ? "ko-KR"
-                        : W2Y.lang === "zh-CN"
-                            ? "zh-CN"
-                            : W2Y.lang,
-            {
-
-                day:
-                    "2-digit",
-
-                month:
-                    "2-digit",
-
-                year:
-                    "numeric"
-
-            }
-        );
-
-    }catch(error){
-
-        return date.toLocaleDateString();
-
-    }
-
-};
-
-
-/* =========================================================
-   GET STATUS LABEL
-   ========================================================= */
-
-W2Y.getStatusLabel =
-function(state){
-
-    const text =
-        W2Y.state.language ||
-        W2Y.defaultText;
-
-
-    switch(state){
-
-        case "FINISHED":
-
-            return text.completed;
-
-
-        case "RELEASING":
-
-            return text.releasing;
-
-
-        case "NOT_YET":
-
-            return text.notYet;
-
-
-        default:
-
-            return text.unknown;
-
-    }
-
-};
-
-
-/* =========================================================
-   GET STATUS CLASS
-   ========================================================= */
-
-W2Y.getStatusClass =
-function(state){
-
-    switch(state){
-
-        case "FINISHED":
-
-            return "finished";
-
-
-        case "RELEASING":
-
-            return "releasing";
-
-
-        case "NOT_YET":
-
-            return "not-yet";
-
-
-        default:
-
-            return "unknown";
-
-    }
-
-};
-
-
-/* =========================================================
-   GET EPISODE TEXT
-   ========================================================= */
-
-W2Y.getEpisodeText =
-function(anime){
-
-    const text =
-        W2Y.state.language ||
-        W2Y.defaultText;
-
-
-    if(
-        anime.episodes === null ||
-        anime.episodes === undefined
-    ){
-
-        return "";
-
-    }
-
-
-    const episodes =
+        const total =
         Number(
             anime.episodes
         );
 
 
-    if(
-        !Number.isFinite(
-            episodes
-        ) ||
-        episodes <= 0
-    ){
+        if (
+            Number.isFinite(total) &&
+            total >= 0
+        ) {
+
+            return total;
+
+        }
+
+    }
+
+
+    return null;
+
+};
+
+
+/* =========================================================
+   7. GET STATUS
+   ========================================================= */
+
+W2Y.getStatusText =
+function (anime) {
+
+    if (!anime) {
+
+        return W2Y.text.unknown;
+
+    }
+
+
+    switch (
+        anime.status
+    ) {
+
+        case "FINISHED":
+
+            return W2Y.text.completed;
+
+
+        case "NOT_YET_RELEASED":
+
+            return W2Y.text.notYet;
+
+
+        case "RELEASING":
+
+            return W2Y.text.releasing;
+
+
+        default:
+
+            return W2Y.text.unknown;
+
+    }
+
+};
+
+
+/* =========================================================
+   8. DATA SIGNATURE
+   =========================================================
+
+   Dùng để phát hiện JSON có thay đổi.
+
+   Nếu:
+
+   episode = 1175
+   airingAt = X
+   updatedAt = Y
+
+   không đổi → không restart countdown.
+
+   ========================================================= */
+
+W2Y.getDataSignature =
+function (anime) {
+
+    if (!anime) {
 
         return "";
 
     }
-
-
-    return (
-        episodes +
-        " " +
-        text.episodes
-    );
-
-};
-
-
-/* =========================================================
-   GET DURATION TEXT
-   ========================================================= */
-
-W2Y.getDurationText =
-function(anime){
-
-    const text =
-        W2Y.state.language ||
-        W2Y.defaultText;
-
-
-    if(
-        !anime.duration
-    ){
-
-        return "";
-
-    }
-
-
-    const duration =
-        Number(
-            anime.duration
-        );
-
-
-    if(
-        !Number.isFinite(
-            duration
-        ) ||
-        duration <= 0
-    ){
-
-        return "";
-
-    }
-
-
-    return (
-        duration +
-        " " +
-        text.duration
-    );
-
-};
-
-
-/* =========================================================
-   RENDER BASIC INFO
-   ========================================================= */
-
-W2Y.renderInfo =
-function(anime,state){
-
-    const text =
-        W2Y.state.language ||
-        W2Y.defaultText;
-
-
-    const title =
-        W2Y.escapeHTML(
-            W2Y.getTitle(
-                anime
-            )
-        );
-
-
-    const status =
-        W2Y.escapeHTML(
-            W2Y.getStatusLabel(
-                state
-            )
-        );
-
-
-    const statusClass =
-        W2Y.getStatusClass(
-            state
-        );
-
-
-    const episodeText =
-        W2Y.escapeHTML(
-            W2Y.getEpisodeText(
-                anime
-            )
-        );
-
-
-    const durationText =
-        W2Y.escapeHTML(
-            W2Y.getDurationText(
-                anime
-            )
-        );
-
-
-    return `
-
-        <div class="w2y-anime-card">
-
-            <div class="w2y-anime-title">
-                ${title}
-            </div>
-
-
-            <div
-                class="w2y-anime-status
-                       w2y-status-${statusClass}"
-            >
-
-                ${status}
-
-            </div>
-
-
-            <div class="w2y-anime-meta">
-
-                ${
-                    episodeText
-                        ? `<span>${episodeText}</span>`
-                        : ""
-                }
-
-                ${
-                    durationText
-                        ? `<span>${durationText}</span>`
-                        : ""
-                }
-
-            </div>
-
-        </div>
-
-    `;
-
-};
-
-
-/* =========================================================
-   RENDER NOT YET RELEASED
-   ========================================================= */
-
-W2Y.renderNotYet =
-function(anime){
-
-    const text =
-        W2Y.state.language ||
-        W2Y.defaultText;
-
-
-    const start =
-        W2Y.getStartTimestamp(
-            anime
-        );
-
-
-    let dateHTML = "";
-
-
-    if(start !== null){
-
-        dateHTML = `
-
-            <div class="w2y-release-date">
-
-                <span class="w2y-small-label">
-                    ${W2Y.escapeHTML(
-                        text.expected
-                    )}
-                </span>
-
-                <strong>
-                    ${W2Y.escapeHTML(
-                        W2Y.formatDate(
-                            start
-                        )
-                    )}
-                </strong>
-
-            </div>
-
-        `;
-
-    }
-
-
-    W2Y.box.innerHTML = `
-
-        ${W2Y.renderInfo(
-            anime,
-            "NOT_YET"
-        )}
-
-
-        <div class="w2y-state-panel">
-
-            <div class="w2y-state-main">
-
-                ${W2Y.escapeHTML(
-                    text.notYet
-                )}
-
-            </div>
-
-
-            ${
-                dateHTML
-            }
-
-        </div>
-
-    `;
-
-};
-
-
-/* =========================================================
-   RENDER FINISHED
-   ========================================================= */
-
-W2Y.renderFinished =
-function(anime){
-
-    const text =
-        W2Y.state.language ||
-        W2Y.defaultText;
-
-
-    const episodes =
-        Number(
-            anime.episodes
-        );
-
-
-    let episodeHTML =
-        "";
-
-
-    if(
-        Number.isFinite(
-            episodes
-        ) &&
-        episodes > 0
-    ){
-
-        episodeHTML = `
-
-            <div class="w2y-finished-episodes">
-
-                <span class="w2y-small-label">
-
-                    ${W2Y.escapeHTML(
-                        text.completedEpisodes
-                    )}
-
-                </span>
-
-
-                <strong>
-
-                    ${W2Y.escapeHTML(
-                        String(episodes)
-                    )}
-
-                    <span>
-                        ${W2Y.escapeHTML(
-                            text.episodes
-                        )}
-                    </span>
-
-                </strong>
-
-            </div>
-
-        `;
-
-    }
-
-
-    const end =
-        W2Y.getEndTimestamp(
-            anime
-        );
-
-
-    let endHTML =
-        "";
-
-
-    if(end !== null){
-
-        endHTML = `
-
-            <div class="w2y-finished-date">
-
-                ${W2Y.escapeHTML(
-                    text.end
-                )}
-
-                :
-
-                ${W2Y.escapeHTML(
-                    W2Y.formatDateOnly(
-                        end
-                    )
-                )}
-
-            </div>
-
-        `;
-
-    }
-
-
-    W2Y.box.innerHTML = `
-
-        ${W2Y.renderInfo(
-            anime,
-            "FINISHED"
-        )}
-
-
-        <div class="w2y-state-panel">
-
-            <div class="w2y-state-main">
-
-                ${W2Y.escapeHTML(
-                    text.completed
-                )}
-
-            </div>
-
-
-            ${
-                episodeHTML
-            }
-
-
-            ${
-                endHTML
-            }
-
-        </div>
-
-    `;
-
-};
-
-
-/* =========================================================
-   RENDER RELEASING
-   ========================================================= */
-
-W2Y.renderReleasing =
-function(anime){
-
-    const text =
-        W2Y.state.language ||
-        W2Y.defaultText;
 
 
     const next =
-        W2Y.getNextAiring(
-            anime
-        );
+    W2Y.getNextAiring(
+        anime
+    );
+
+
+    return JSON.stringify({
+
+        id:
+            anime.id,
+
+        status:
+            anime.status,
+
+        episodes:
+            anime.episodes,
+
+        updatedAt:
+            anime.updatedAt,
+
+        nextEpisode:
+            next
+                ? next.episode
+                : null,
+
+        airingAt:
+            next
+                ? next.airingAt
+                : null
+
+    });
+
+};
+
+
+/* =========================================================
+   9. SET TEXT
+   ========================================================= */
+
+W2Y.setText =
+function (element, value) {
+
+    if (element) {
+
+        element.textContent =
+        value;
+
+    }
+
+};
+
+
+/* =========================================================
+   10. SET STATUS
+   ========================================================= */
+
+W2Y.setStatus =
+function (value) {
+
+    W2Y.setText(
+        W2Y.elements.status,
+        value
+    );
+
+};
+
+
+/* =========================================================
+   11. SET PROGRESS
+   ========================================================= */
+
+W2Y.setProgress =
+function (value) {
+
+    if (
+        !W2Y.elements.progress
+    ) {
+
+        return;
+
+    }
+
+
+    const percent =
+    Math.max(
+        0,
+        Math.min(
+            100,
+            Number(value) || 0
+        )
+    );
 
 
     /*
-     * ĐANG PHÁT SÓNG
-     * nhưng AniList chưa có lịch
-     * tập tiếp theo.
+     * Hỗ trợ cả:
+
+     * width element
+     *
+     * hoặc progress element.
      */
 
-    if(!next){
+    W2Y.elements.progress.style.width =
+    percent + "%";
 
-        W2Y.box.innerHTML = `
-
-            ${W2Y.renderInfo(
-                anime,
-                "RELEASING"
-            )}
+};
 
 
-            <div class="w2y-state-panel">
+/* =========================================================
+   12. STOP TIMER
+   ========================================================= */
 
-                <div class="w2y-state-main">
+W2Y.stopTimer =
+function () {
 
-                    ${W2Y.escapeHTML(
-                        text.releasing
-                    )}
+    if (
+        W2Y.state.countdownTimer
+    ) {
 
-                </div>
+        clearInterval(
+            W2Y.state.countdownTimer
+        );
+
+        W2Y.state.countdownTimer =
+        null;
+
+    }
+
+};
 
 
-                <div class="w2y-no-schedule">
+/* =========================================================
+   13. RENDER FINISHED
+   ========================================================= */
 
-                    ${W2Y.escapeHTML(
-                        text.noNext
-                    )}
+W2Y.renderFinished =
+function (anime) {
 
-                </div>
+    W2Y.stopTimer();
 
-            </div>
 
-        `;
+    const current =
+    W2Y.getCurrentEpisode(
+        anime
+    );
+
+
+    W2Y.setText(
+
+        W2Y.elements.current,
+
+        current !== null
+            ? current
+            : "—"
+
+    );
+
+
+    W2Y.setText(
+
+        W2Y.elements.next,
+
+        "✓"
+
+    );
+
+
+    W2Y.setText(
+
+        W2Y.elements.timer,
+
+        W2Y.text.completed
+
+    );
+
+
+    W2Y.setText(
+
+        W2Y.elements.release,
+
+        anime.endDate
+            ? (
+                "Đã kết thúc — " +
+                W2Y.formatDateFromParts(
+                    anime.endDate
+                )
+            )
+            : W2Y.text.completed
+
+    );
+
+
+    W2Y.setProgress(
+        100
+    );
+
+
+    W2Y.setStatus(
+        W2Y.text.updated
+    );
+
+};
+
+
+/* =========================================================
+   14. FORMAT DATE FROM ANILIST PARTS
+   ========================================================= */
+
+W2Y.formatDateFromParts =
+function (parts) {
+
+    if (
+        !parts ||
+        !parts.year ||
+        !parts.month ||
+        !parts.day
+    ) {
+
+        return "";
+
+    }
+
+
+    /*
+     * Ngày AniList không chứa giờ.
+     * Chỉ dùng để hiển thị ngày.
+     */
+
+    const date =
+    new Date(
+        Date.UTC(
+            Number(parts.year),
+            Number(parts.month) - 1,
+            Number(parts.day)
+        )
+    );
+
+
+    return date.toLocaleDateString(
+        "vi-VN",
+        {
+
+            timeZone:
+                W2Y.config.vietnamTimezone,
+
+            day:
+                "2-digit",
+
+            month:
+                "2-digit",
+
+            year:
+                "numeric"
+
+        }
+    );
+
+};
+
+
+/* =========================================================
+   15. RENDER NO SCHEDULE
+   ========================================================= */
+
+W2Y.renderNoSchedule =
+function (anime) {
+
+    W2Y.stopTimer();
+
+
+    const current =
+    W2Y.getCurrentEpisode(
+        anime
+    );
+
+
+    W2Y.setText(
+
+        W2Y.elements.current,
+
+        current !== null
+            ? current
+            : "—"
+
+    );
+
+
+    W2Y.setText(
+
+        W2Y.elements.next,
+
+        "—"
+
+    );
+
+
+    W2Y.setText(
+
+        W2Y.elements.timer,
+
+        W2Y.text.noSchedule
+
+    );
+
+
+    W2Y.setText(
+
+        W2Y.elements.release,
+
+        W2Y.text.waiting
+
+    );
+
+
+    W2Y.setProgress(
+        0
+    );
+
+
+    W2Y.setStatus(
+        W2Y.text.updated
+    );
+
+};
+
+
+/* =========================================================
+   16. START COUNTDOWN
+   ========================================================= */
+
+W2Y.startCountdown =
+function (next) {
+
+    W2Y.stopTimer();
+
+
+    const target =
+    next.timestamp;
+
+
+    W2Y.state.countdownTarget =
+    target;
+
+
+    function tick() {
+
+        /*
+         * Lấy giờ hiện tại mỗi giây.
+         */
+
+        const now =
+        Date.now();
+
+
+        const remaining =
+        target - now;
+
+
+        /*
+         * CHƯA TỚI GIỜ
+         */
+
+        if (
+            remaining > 0
+        ) {
+
+            W2Y.setText(
+
+                W2Y.elements.timer,
+
+                W2Y.formatCountdown(
+                    remaining
+                )
+
+            );
+
+
+            W2Y.setText(
+
+                W2Y.elements.release,
+
+                "Dự kiến phát: " +
+                W2Y.formatVietnamDate(
+                    target
+                )
+
+            );
+
+
+            W2Y.setProgress(
+                100
+            );
+
+
+            return;
+
+        }
+
+
+        /*
+         * COUNTDOWN KẾT THÚC.
+         *
+         * CỰC KỲ QUAN TRỌNG:
+         *
+         * KHÔNG đổi tập.
+         * KHÔNG cộng tập.
+         * KHÔNG giả định AniList đã cập nhật.
+         */
+
+        W2Y.stopTimer();
+
+
+        W2Y.state.waitingForR2AfterAir =
+        true;
+
+
+        W2Y.setText(
+
+            W2Y.elements.timer,
+
+            W2Y.text.expired
+
+        );
+
+
+        W2Y.setText(
+
+            W2Y.elements.release,
+
+            W2Y.text.waiting
+
+        );
+
+
+        W2Y.setProgress(
+            100
+        );
+
+
+        W2Y.setStatus(
+            "Đã đến giờ — chờ R2 xác nhận tập mới."
+        );
+
+
+        /*
+         * Kiểm tra R2 ngay sau khi countdown kết thúc.
+         *
+         * Nhưng nếu R2 vẫn trả dữ liệu cũ,
+         * card vẫn giữ nguyên.
+         */
+
+        setTimeout(
+            function () {
+
+                if (
+                    !W2Y.state.destroyed
+                ) {
+
+                    W2Y.refresh(
+                        true
+                    );
+
+                }
+
+            },
+            5000
+        );
+
+    }
+
+
+    tick();
+
+
+    W2Y.state.countdownTimer =
+    setInterval(
+        tick,
+        1000
+    );
+
+};
+
+
+/* =========================================================
+   17. RENDER RELEASING
+   ========================================================= */
+
+W2Y.renderReleasing =
+function (anime) {
+
+    const next =
+    W2Y.getNextAiring(
+        anime
+    );
+
+
+    /*
+     * Có lịch tập tiếp.
+     */
+
+    if (next) {
+
+        const current =
+        Math.max(
+            0,
+            next.episode - 1
+        );
+
+
+        W2Y.setText(
+
+            W2Y.elements.current,
+
+            current
+
+        );
+
+
+        W2Y.setText(
+
+            W2Y.elements.next,
+
+            next.episode
+
+        );
+
+
+        W2Y.setText(
+
+            W2Y.elements.release,
+
+            "Dự kiến phát: " +
+            W2Y.formatVietnamDate(
+                next.timestamp
+            )
+
+        );
+
+
+        W2Y.setStatus(
+            W2Y.text.updated
+        );
+
+
+        /*
+         * Nếu đây chính là lịch cũ
+         * thì không tạo timer mới.
+         */
+
+        const signature =
+        String(
+            next.episode
+        ) +
+        "|" +
+        String(
+            next.airingAt
+        );
+
+
+        if (
+            W2Y.state.nextAiringSignature ===
+            signature &&
+            W2Y.state.countdownTimer
+        ) {
+
+            return;
+
+        }
+
+
+        W2Y.state.nextAiringSignature =
+        signature;
+
+
+        W2Y.state.waitingForR2AfterAir =
+        false;
+
+
+        W2Y.startCountdown(
+            next
+        );
+
 
         return;
 
@@ -1743,156 +1865,24 @@ function(anime){
 
 
     /*
-     * Có tập tiếp theo.
+     * RELEASING nhưng AniList chưa có lịch.
      */
 
-    W2Y.box.innerHTML = `
-
-        ${W2Y.renderInfo(
-            anime,
-            "RELEASING"
-        )}
-
-
-        <div class="w2y-state-panel">
-
-            <div class="w2y-next-label">
-
-                ${W2Y.escapeHTML(
-                    text.next
-                )}
-
-            </div>
-
-
-            <div class="w2y-next-episode">
-
-                ${W2Y.escapeHTML(
-                    String(next.episode)
-                )}
-
-            </div>
-
-
-            <div
-                id="w2y-countdown-time"
-                class="w2y-countdown-time"
-            >
-
-                ${W2Y.escapeHTML(
-                    text.calculating
-                )}
-
-            </div>
-
-
-            <div
-                id="w2y-next-release"
-                class="w2y-next-release"
-            >
-
-                ${W2Y.escapeHTML(
-                    text.expected
-                )}
-
-                :
-
-                ${W2Y.escapeHTML(
-                    W2Y.formatDate(
-                        next.timestamp
-                    )
-                )}
-
-            </div>
-
-
-            <div class="w2y-progress">
-
-                <div
-                    id="w2y-progress-bar"
-                ></div>
-
-            </div>
-
-        </div>
-
-    `;
+    W2Y.renderNoSchedule(
+        anime
+    );
 
 };
 
 
 /* =========================================================
-   RENDER UNKNOWN
-   ========================================================= */
-
-W2Y.renderUnknown =
-function(anime){
-
-    const text =
-        W2Y.state.language ||
-        W2Y.defaultText;
-
-
-    W2Y.box.innerHTML = `
-
-        ${W2Y.renderInfo(
-            anime,
-            "UNKNOWN"
-        )}
-
-
-        <div class="w2y-state-panel">
-
-            <div class="w2y-state-main">
-
-                ${W2Y.escapeHTML(
-                    text.unknown
-                )}
-
-            </div>
-
-        </div>
-
-    `;
-
-};
-
-
-/* =========================================================
-   RENDER ANIME
+   18. RENDER ANIME
    ========================================================= */
 
 W2Y.render =
-function(anime){
+function (anime, source) {
 
-    if(!anime){
-
-        W2Y.box.innerHTML = `
-
-            <div class="w2y-state-panel">
-
-                <div class="w2y-state-main">
-
-                    Không tải được dữ liệu anime.
-
-                </div>
-
-            </div>
-
-        `;
-
-        return;
-
-    }
-
-
-    const normalized =
-        W2Y.normalize(
-            anime
-        );
-
-
-    if(!normalized){
+    if (!anime) {
 
         return;
 
@@ -1900,63 +1890,458 @@ function(anime){
 
 
     W2Y.state.anime =
-        normalized;
+    anime;
+
+    W2Y.state.source =
+    source || "R2";
 
 
-    W2Y.state.currentState =
-        W2Y.getState(
-            normalized
-        );
-
-
-    W2Y.state.nextAiring =
-        W2Y.getNextAiring(
-            normalized
-        );
+    const dataSignature =
+    W2Y.getDataSignature(
+        anime
+    );
 
 
     /*
-     * Render theo trạng thái.
+     * Nếu JSON hoàn toàn giống bản trước
+     * và countdown đang chạy,
+     * không render lại.
      */
 
-    switch(
-        W2Y.state.currentState
-    ){
+    if (
+        W2Y.state.lastDataSignature ===
+        dataSignature &&
+        W2Y.state.countdownTimer
+    ) {
 
-        case "NOT_YET":
+        return;
 
-            W2Y.renderNotYet(
-                normalized
+    }
+
+
+    W2Y.state.lastDataSignature =
+    dataSignature;
+
+
+    /*
+     * FINISHED
+     */
+
+    if (
+        anime.status ===
+        "FINISHED"
+    ) {
+
+        W2Y.renderFinished(
+            anime
+        );
+
+        return;
+
+    }
+
+
+    /*
+     * NOT YET
+     */
+
+    if (
+        anime.status ===
+        "NOT_YET_RELEASED"
+    ) {
+
+        W2Y.stopTimer();
+
+
+        W2Y.setText(
+            W2Y.elements.current,
+            "—"
+        );
+
+
+        W2Y.setText(
+            W2Y.elements.next,
+            "1"
+        );
+
+
+        W2Y.setText(
+            W2Y.elements.timer,
+            W2Y.text.notYet
+        );
+
+
+        W2Y.setText(
+
+            W2Y.elements.release,
+
+            anime.startDate
+                ? (
+                    "Dự kiến bắt đầu: " +
+                    W2Y.formatDateFromParts(
+                        anime.startDate
+                    )
+                )
+                : W2Y.text.notYet
+
+        );
+
+
+        W2Y.setProgress(
+            0
+        );
+
+
+        W2Y.setStatus(
+            W2Y.text.updated
+        );
+
+
+        return;
+
+    }
+
+
+    /*
+     * RELEASING
+     */
+
+    if (
+        anime.status ===
+        "RELEASING"
+    ) {
+
+        W2Y.renderReleasing(
+            anime
+        );
+
+        return;
+
+    }
+
+
+    /*
+     * UNKNOWN
+     */
+
+    W2Y.renderNoSchedule(
+        anime
+    );
+
+};
+
+
+/* =========================================================
+   19. PART 2 READY
+   ========================================================= */
+
+W2Y.part2Ready =
+true;
+
+
+})();
+</script>
+
+
+<script>
+(function () {
+
+"use strict";
+
+const W2Y =
+window.W2YCountdown;
+
+
+/* =========================================================
+   WHY2YUE — COUNTDOWN ENGINE
+   PART 3/3
+
+   LOAD + REFRESH + ERROR HANDLING
+   ========================================================= */
+
+
+/* =========================================================
+   1. INITIAL RENDER
+   ========================================================= */
+
+W2Y.renderLoading =
+function () {
+
+    W2Y.setText(
+
+        W2Y.elements.timer,
+
+        W2Y.text.loading
+
+    );
+
+
+    W2Y.setText(
+
+        W2Y.elements.release,
+
+        W2Y.text.connecting
+
+    );
+
+
+    W2Y.setStatus(
+        W2Y.text.loading
+    );
+
+};
+
+
+/* =========================================================
+   2. LOAD LOCAL FALLBACK
+   ========================================================= */
+
+W2Y.useLocalFallback =
+function () {
+
+    const local =
+    W2Y.loadLocal();
+
+
+    if (!local) {
+
+        return false;
+
+    }
+
+
+    const anime =
+    W2Y.normalize(
+        local
+    );
+
+
+    if (!anime) {
+
+        return false;
+
+    }
+
+
+    W2Y.render(
+        anime,
+        "local"
+    );
+
+
+    W2Y.setStatus(
+        "Đang dùng dữ liệu đã lưu trước đó."
+    );
+
+
+    return true;
+
+};
+
+
+/* =========================================================
+   3. REFRESH R2
+   ========================================================= */
+
+W2Y.refresh =
+async function (force) {
+
+    /*
+     * Không cho hai request chạy cùng lúc.
+     */
+
+    if (
+        W2Y.state.refreshing
+    ) {
+
+        return;
+
+    }
+
+
+    W2Y.state.refreshing =
+    true;
+
+
+    try {
+
+        const raw =
+        await W2Y.loadR2();
+
+
+        const anime =
+        W2Y.normalize(
+            raw
+        );
+
+
+        if (!anime) {
+
+            throw new Error(
+                "Không thể normalize JSON."
             );
 
-            break;
+        }
 
 
-        case "RELEASING":
+        /*
+         * Lưu bản mới vào localStorage.
+         */
 
-            W2Y.renderReleasing(
-                normalized
+        W2Y.saveLocal(
+            raw
+        );
+
+
+        /*
+         * Render.
+         *
+         * Nếu dữ liệu không đổi,
+         * render() sẽ không restart
+         * countdown.
+         */
+
+        W2Y.render(
+            anime,
+            "R2"
+        );
+
+
+        /*
+         * Nếu countdown trước đó đã hết,
+         * nhưng R2 vẫn trả cùng episode,
+         * vẫn phải tiếp tục chờ.
+         */
+
+        const next =
+        W2Y.getNextAiring(
+            anime
+        );
+
+
+        if (
+            W2Y.state.waitingForR2AfterAir &&
+            next
+        ) {
+
+            /*
+             * Nếu airingAt vẫn là thời điểm cũ
+             * thì chưa có dữ liệu mới.
+             */
+
+            if (
+                next.timestamp <=
+                Date.now()
+            ) {
+
+                W2Y.setText(
+
+                    W2Y.elements.timer,
+
+                    W2Y.text.expired
+
+                );
+
+
+                W2Y.setText(
+
+                    W2Y.elements.release,
+
+                    W2Y.text.waiting
+
+                );
+
+
+                W2Y.setStatus(
+                    "R2 chưa có tập mới — tiếp tục chờ."
+                );
+
+            }
+            else {
+
+                W2Y.state.waitingForR2AfterAir =
+                false;
+
+            }
+
+        }
+
+
+    }
+    catch (error) {
+
+        console.warn(
+            "WHY2YUE: R2 refresh failed.",
+            error
+        );
+
+
+        /*
+         * CÓ DỮ LIỆU CŨ:
+         *
+         * Không phá countdown.
+         */
+
+        if (
+            W2Y.state.anime
+        ) {
+
+            W2Y.setStatus(
+                W2Y.text.oldData
             );
 
-            break;
+
+            /*
+             * Nếu timer đang chạy:
+             * không làm gì thêm.
+             */
+
+        }
+        else {
+
+            /*
+             * Chưa từng có R2.
+             *
+             * Thử localStorage.
+             */
+
+            const usedLocal =
+            W2Y.useLocalFallback();
 
 
-        case "FINISHED":
+            if (!usedLocal) {
 
-            W2Y.renderFinished(
-                normalized
-            );
+                W2Y.setText(
 
-            break;
+                    W2Y.elements.timer,
+
+                    W2Y.text.noData
+
+                );
 
 
-        default:
+                W2Y.setText(
 
-            W2Y.renderUnknown(
-                normalized
-            );
+                    W2Y.elements.release,
 
-            break;
+                    "Không thể kết nối Cloudflare R2."
+
+                );
+
+
+                W2Y.setStatus(
+                    "Kiểm tra R2 URL, CORS hoặc AniList ID."
+                );
+
+            }
+
+        }
+
+    }
+    finally {
+
+        W2Y.state.refreshing =
+        false;
 
     }
 
@@ -1964,397 +2349,100 @@ function(anime){
 
 
 /* =========================================================
-   PART 2 READY
+   4. START REFRESH LOOP
    ========================================================= */
 
-W2Y.part2Ready =
-    true;
+W2Y.startRefreshLoop =
+function () {
 
-
-/* =========================================================
-   WAIT FOR PART 3
-   ========================================================= */
-
-if(
-    typeof W2Y.startPart3 ===
-    "function"
-){
-
-    W2Y.startPart3();
-
-}
-
-
-})();
-</script>
-
-/* =========================================================
-   WHY2YUE COUNTDOWN.JS
-   P3 / 3
-   ========================================================= */
-
-
-/*
-|--------------------------------------------------------------------------
-| REFRESH DATA
-|--------------------------------------------------------------------------
-|
-| Khi:
-|
-| - countdown về 0
-| - hoặc đến chu kỳ refresh
-|
-| countdown sẽ lấy JSON mới từ R2.
-|
-| Không tự cộng episode bằng JavaScript.
-|
-| Episode mới phải lấy từ AniList → GitHub → R2.
-|
-|--------------------------------------------------------------------------
-*/
-
-let refreshing = false;
-
-
-async function refreshAnimeData(){
-
-    /*
-    |--------------------------------------------------------------------------
-    | CHỐNG REQUEST TRÙNG
-    |--------------------------------------------------------------------------
-    */
-
-    if(refreshing){
-
-        return null;
-
-    }
-
-
-    refreshing = true;
-
-
-    try{
-
-        const freshData =
-            await getR2AnimeData();
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | R2 CHƯA CÓ DỮ LIỆU MỚI
-        |--------------------------------------------------------------------------
-        */
-
-        if(!freshData){
-
-            console.warn(
-                "WHY2YUE: R2 refresh failed."
-            );
-
-            return null;
-
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | LƯU DỮ LIỆU MỚI
-        |--------------------------------------------------------------------------
-        */
-
-        currentAnime =
-            freshData;
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | RENDER LẠI
-        |--------------------------------------------------------------------------
-        */
-
-        renderAnime(
-            freshData,
-            currentText
-        );
-
-
-        return freshData;
-
-
-    }catch(error){
-
-        console.error(
-            "WHY2YUE: refresh error",
-            error
-        );
-
-        return null;
-
-
-    }finally{
-
-        refreshing = false;
-
-    }
-
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| PERIODIC REFRESH
-|--------------------------------------------------------------------------
-|
-| Mặc định:
-|
-| 5 phút / lần
-|
-| Đây là lớp bảo hiểm.
-|
-| Nếu countdown đang chạy bình thường,
-| dữ liệu vẫn được kiểm tra định kỳ.
-|
-|--------------------------------------------------------------------------
-*/
-
-function startPeriodicRefresh(){
-
-    if(refreshTimer){
+    if (
+        W2Y.state.refreshTimer
+    ) {
 
         clearInterval(
-            refreshTimer
-        );
-
-        refreshTimer = null;
-
-    }
-
-
-    refreshTimer =
-        setInterval(
-
-            async function(){
-
-                await refreshAnimeData();
-
-            },
-
-            REFRESH_INTERVAL
-
-        );
-
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| COUNTDOWN RECHECK
-|--------------------------------------------------------------------------
-|
-| Khi countdown đạt 0:
-|
-| Không tự chuyển:
-|
-| 1175 → 1176
-|
-| mà request R2.
-|
-| Nếu GitHub đã cập nhật:
-|
-| R2:
-| 1175 → 1176
-|
-| countdown:
-| 1176 → thời gian mới
-|
-| Nếu GitHub chưa cập nhật:
-|
-| giữ dữ liệu cũ và thử lại.
-|
-|--------------------------------------------------------------------------
-*/
-
-async function handleEpisodeReached(){
-
-    /*
-    |--------------------------------------------------------------------------
-    | HIỂN THỊ TRẠNG THÁI
-    |--------------------------------------------------------------------------
-    */
-
-    const timer =
-        document.getElementById(
-            "countdown-time"
-        );
-
-
-    if(timer){
-
-        timer.innerHTML =
-            currentText.calculating;
-
-    }
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | LẤY DATA MỚI
-    |--------------------------------------------------------------------------
-    */
-
-    const freshData =
-        await refreshAnimeData();
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | R2 CHƯA CÓ DATA MỚI
-    |--------------------------------------------------------------------------
-    */
-
-    if(!freshData){
-
-        /*
-         * Thử lại sau 30 giây.
-         *
-         * Không cần reload trang.
-         */
-
-        setTimeout(
-
-            function(){
-
-                handleEpisodeReached();
-
-            },
-
-            30000
-
+            W2Y.state.refreshTimer
         );
 
     }
 
-}
 
-
-/*
-|--------------------------------------------------------------------------
-| PERIODIC SAFETY CHECK
-|--------------------------------------------------------------------------
-|
-| Ngoài interval 5 phút,
-| countdown còn có thể tự kiểm tra
-| khi gần tới thời điểm phát.
-|
-|--------------------------------------------------------------------------
-*/
-
-function startSafetyCheck(){
-
+    W2Y.state.refreshTimer =
     setInterval(
 
-        async function(){
+        function () {
 
-            if(!currentAnime){
+            if (
+                !W2Y.state.destroyed
+            ) {
 
-                return;
-
-            }
-
-
-            const next =
-                currentAnime.nextAiringEpisode;
-
-
-            /*
-             * Không có next episode:
-             *
-             * Có thể là:
-             *
-             * - FINISHED
-             * - NOT_YET
-             * - AniList chưa có lịch
-             */
-
-            if(!next){
-
-                return;
-
-            }
-
-
-            const airingAt =
-                Number(
-                    next.airingAt
+                W2Y.refresh(
+                    false
                 );
-
-
-            if(
-                !Number.isFinite(
-                    airingAt
-                )
-            ){
-
-                return;
-
-            }
-
-
-            const remaining =
-                airingAt * 1000 -
-                Date.now();
-
-
-            /*
-             * Nếu đã tới giờ
-             */
-
-            if(remaining <= 0){
-
-                await handleEpisodeReached();
 
             }
 
         },
 
-        10000
+        W2Y.config.refreshInterval
 
     );
 
-}
+};
 
 
-/*
-|--------------------------------------------------------------------------
-| VISIBILITY CHANGE
-|--------------------------------------------------------------------------
-|
-| Người dùng có thể:
-|
-| - mở trang
-| - tắt màn hình
-| - quay lại sau 30 phút
-|
-| Khi quay lại:
-|
-| → kiểm tra R2 ngay.
-|
-|--------------------------------------------------------------------------
-*/
+/* =========================================================
+   5. DESTROY
+   ========================================================= */
+
+W2Y.destroy =
+function () {
+
+    W2Y.state.destroyed =
+    true;
+
+
+    W2Y.stopTimer();
+
+
+    if (
+        W2Y.state.refreshTimer
+    ) {
+
+        clearInterval(
+            W2Y.state.refreshTimer
+        );
+
+        W2Y.state.refreshTimer =
+        null;
+
+    }
+
+};
+
+
+/* =========================================================
+   6. VISIBILITY
+   =========================================================
+   
+   Nếu người dùng rời tab lâu:
+   khi quay lại kiểm tra R2 ngay.
+   
+   ========================================================= */
 
 document.addEventListener(
 
     "visibilitychange",
 
-    function(){
+    function () {
 
-        if(
+        if (
             document.visibilityState ===
             "visible"
-        ){
+        ) {
 
-            refreshAnimeData();
+            W2Y.refresh(
+                true
+            );
 
         }
 
@@ -2363,187 +2451,66 @@ document.addEventListener(
 );
 
 
-/*
-|--------------------------------------------------------------------------
-| PAGE FOCUS
-|--------------------------------------------------------------------------
-|
-| Một số trình duyệt mobile không phát hiện
-| visibility theo cách ổn định.
-|
-|--------------------------------------------------------------------------
-*/
+/* =========================================================
+   7. PAGE UNLOAD
+   ========================================================= */
 
 window.addEventListener(
 
-    "focus",
+    "pagehide",
 
-    function(){
+    function () {
 
-        refreshAnimeData();
+        W2Y.destroy();
 
     }
 
 );
 
 
+/* =========================================================
+   8. INITIALIZE
+   ========================================================= */
+
+W2Y.renderLoading();
+
+
 /*
-|--------------------------------------------------------------------------
-| INITIAL LOAD
-|--------------------------------------------------------------------------
-*/
+ * Nếu R2 lỗi ngay lần đầu,
+ * local cache sẽ được thử.
+ */
 
-async function initCountdown(){
-
-    /*
-     |--------------------------------------------------------------------------
-     | LOAD LANGUAGE
-     |--------------------------------------------------------------------------
-     */
-
-    const text =
-        await loadLanguage();
+W2Y.refresh(
+    true
+);
 
 
-    currentText =
-        text;
+/*
+ * Sau đó cứ 5 phút kiểm tra R2.
+ */
+
+W2Y.startRefreshLoop();
 
 
-    /*
-     |--------------------------------------------------------------------------
-     | LOADING UI
-     |--------------------------------------------------------------------------
-     */
+/* =========================================================
+   9. READY
+   ========================================================= */
 
-    showLoading(
-        text
-    );
+W2Y.ready =
+true;
 
 
-    /*
-     |--------------------------------------------------------------------------
-     | LOAD ANIME
-     |--------------------------------------------------------------------------
-     |
-     | Thứ tự:
-     |
-     | 1. R2
-     | 2. embedded data
-     |
-     |--------------------------------------------------------------------------
-     */
+console.log(
+    "WHY2YUE Countdown ready:",
+    {
+        anilistId:
+            W2Y.animeId,
 
-    const anime =
-        await getAnimeData();
-
-
-    /*
-     |--------------------------------------------------------------------------
-     | CÓ DATA
-     |--------------------------------------------------------------------------
-     */
-
-    if(anime){
-
-        currentAnime =
-            anime;
-
-
-        renderAnime(
-            anime,
-            text
-        );
-
+        r2:
+            W2Y.getR2Url()
     }
+);
 
-
-    /*
-     |--------------------------------------------------------------------------
-     | KHÔNG CÓ DATA
-     |--------------------------------------------------------------------------
-     */
-
-    else{
-
-        box.innerHTML = `
-
-            <div class="anime-error">
-
-                ${text.no_schedule}
-
-            </div>
-
-        `;
-
-    }
-
-
-    /*
-     |--------------------------------------------------------------------------
-     | AUTO REFRESH
-     |--------------------------------------------------------------------------
-     */
-
-    startPeriodicRefresh();
-
-
-    /*
-     |--------------------------------------------------------------------------
-     | SAFETY CHECK
-     |--------------------------------------------------------------------------
-     */
-
-    startSafetyCheck();
-
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| START
-|--------------------------------------------------------------------------
-*/
-
-initCountdown()
-    .catch(
-
-        function(error){
-
-            console.error(
-                "WHY2YUE COUNTDOWN INIT ERROR:",
-                error
-            );
-
-
-            if(box){
-
-                box.innerHTML = `
-
-                    <div class="anime-error">
-
-                        ${
-
-                            currentText?.no_schedule
-                            ||
-                            "Không tải được lịch phát"
-
-                        }
-
-                    </div>
-
-                `;
-
-            }
-
-        }
-
-    );
-
-
-/*
-|--------------------------------------------------------------------------
-| END
-|--------------------------------------------------------------------------
-*/
 
 })();
+</script>
