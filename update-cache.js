@@ -1,53 +1,27 @@
 // ============================================================
 // WHY2YUE — UPDATE CACHE
-// update-cache.js
-// PART 1/2
-//
-// Mục đích:
-//   anime-ids.json
-//        ↓
-//   AniList GraphQL
-//        ↓
-//   chỉ lấy đúng các AniList ID cần thiết
-//        ↓
-//   chuẩn hóa dữ liệu
-//        ↓
-//   chuẩn bị ghi Cloudflare R2
-//
-// KHÔNG quét 1.500 anime.
-// KHÔNG phân trang AniList.
-// KHÔNG xóa cache anime khác.
+// FULL REPLACEMENT
 // ============================================================
 
 "use strict";
 
-
-// ============================================================
-// IMPORT
-// ============================================================
-
 const fs = require("fs");
 const path = require("path");
+const { execFileSync } = require("child_process");
 
 const {
   S3Client,
   PutObjectCommand
 } = require("@aws-sdk/client-s3");
 
-
 // ============================================================
 // PATH
 // ============================================================
 
-const ROOT_DIR =
-  __dirname;
+const ROOT_DIR = __dirname;
 
 const ID_FILE =
-  path.join(
-    ROOT_DIR,
-    "anime-ids.json"
-  );
-
+  path.join(ROOT_DIR, "anime-ids.json");
 
 // ============================================================
 // ENVIRONMENT
@@ -65,20 +39,16 @@ const R2_ACCESS_KEY_ID =
 const R2_SECRET_ACCESS_KEY =
   process.env.R2_SECRET_ACCESS_KEY;
 
-
 // ============================================================
-// KIỂM TRA R2 ENVIRONMENT
+// REQUIRED ENVIRONMENT
 // ============================================================
 
-function requireEnvironment(
-  name,
-  value
-){
+function requireEnvironment(name, value) {
 
-  if(
+  if (
     !value ||
     !String(value).trim()
-  ){
+  ) {
 
     throw new Error(
       `Missing environment variable: ${name}`
@@ -87,7 +57,6 @@ function requireEnvironment(
   }
 
 }
-
 
 requireEnvironment(
   "R2_ENDPOINT",
@@ -109,7 +78,6 @@ requireEnvironment(
   R2_SECRET_ACCESS_KEY
 );
 
-
 // ============================================================
 // R2 CLIENT
 // ============================================================
@@ -117,8 +85,7 @@ requireEnvironment(
 const r2 =
   new S3Client({
 
-    region:
-      "auto",
+    region: "auto",
 
     endpoint:
       R2_ENDPOINT,
@@ -135,86 +102,121 @@ const r2 =
 
   });
 
-
 // ============================================================
 // CONFIG
 // ============================================================
 
 const CONFIG = {
 
-  /*
-   * Số lần thử lại khi AniList hoặc R2
-   * gặp lỗi tạm thời.
-   */
-
-  maxRetries:
-    3,
-
-
-  /*
-   * Thời gian chờ giữa các lần thử.
-   */
-
-  retryDelay:
-    2000,
-
-
-  /*
-   * Nghỉ giữa các ID.
-   *
-   * Không cần nghỉ quá lâu vì chúng ta
-   * chỉ lấy đúng những anime cần thiết.
-   */
+  // ----------------------------------------------------------
+  // General
+  // ----------------------------------------------------------
 
   animeDelay:
-    500,
+    1500,
 
-
-  /*
-   * AniList GraphQL endpoint.
-   */
+  // ----------------------------------------------------------
+  // AniList
+  // ----------------------------------------------------------
 
   aniListURL:
     "https://graphql.anilist.co",
 
+  aniListTimeout:
+    15000,
 
-  /*
-   * Cache-Control của file JSON trên R2.
-   *
-   * Countdown.js vẫn dùng cache-busting
-   * nên khi R2 có dữ liệu mới nó sẽ lấy
-   * được bản mới.
-   */
+  aniListMaxRetries:
+    3,
+
+  // 429:
+  // 30s → 60s → 120s
+  aniList429BaseDelay:
+    30000,
+
+  aniList429MaxDelay:
+    120000,
+
+  // Other temporary HTTP errors:
+  // 5s → 10s → 20s
+  aniListRetryBaseDelay:
+    5000,
+
+  // ----------------------------------------------------------
+  // R2
+  // ----------------------------------------------------------
+
+  r2MaxRetries:
+    3,
+
+  r2RetryDelay:
+    2000,
+
+  // ----------------------------------------------------------
+  // Cache
+  // ----------------------------------------------------------
 
   cacheControl:
     "public, max-age=300"
 
-
 };
 
+// ============================================================
+// UPDATE MODE
+// ============================================================
+//
+// GitHub Actions:
+//
+// push
+//      → incremental
+//
+// schedule
+//      → full
+//
+// workflow_dispatch
+//      → full
+//
+// Có thể override bằng:
+// UPDATE_MODE=incremental
+// ============================================================
+
+const EVENT_NAME =
+  process.env.GITHUB_EVENT_NAME ||
+  "";
+
+let UPDATE_MODE =
+  process.env.UPDATE_MODE ||
+  "";
+
+if (!UPDATE_MODE) {
+
+  if (
+    EVENT_NAME === "push"
+  ) {
+
+    UPDATE_MODE =
+      "incremental";
+
+  } else {
+
+    UPDATE_MODE =
+      "full";
+
+  }
+
+}
+
+if (
+  UPDATE_MODE !== "incremental" &&
+  UPDATE_MODE !== "full"
+) {
+
+  UPDATE_MODE =
+    "full";
+
+}
 
 // ============================================================
 // ANILIST QUERY
-// ============================================================
-//
-// QUAN TRỌNG:
-//
-// Không lấy danh sách anime.
-//
-// Chỉ:
-//
-// id → Media(id: ID)
-//
-// Vì vậy:
-//
-// 21
-// ↓
-// AniList Media(id: 21)
-//
-// 196017
-// ↓
-// AniList Media(id: 196017)
-//
 // ============================================================
 
 const ANILIST_QUERY = `
@@ -222,25 +224,17 @@ const ANILIST_QUERY = `
 query GetAnime($id: Int) {
 
   Media(
-
     id: $id
-
     type: ANIME
-
     isAdult: false
-
   ) {
 
     id
 
     title {
-
       romaji
-
       english
-
       native
-
     }
 
     status
@@ -250,19 +244,15 @@ query GetAnime($id: Int) {
     duration
 
     startDate {
-
       year
       month
       day
-
     }
 
     endDate {
-
       year
       month
       day
-
     }
 
     season
@@ -270,11 +260,8 @@ query GetAnime($id: Int) {
     seasonYear
 
     nextAiringEpisode {
-
       airingAt
-
       episode
-
     }
 
     updatedAt
@@ -285,14 +272,11 @@ query GetAnime($id: Int) {
 
 `;
 
-
 // ============================================================
 // SLEEP
 // ============================================================
 
-function sleep(
-  milliseconds
-){
+function sleep(milliseconds) {
 
   return new Promise(
     resolve =>
@@ -304,81 +288,15 @@ function sleep(
 
 }
 
-
-// ============================================================
-// RETRY HELPER
-// ============================================================
-
-async function withRetry(
-  label,
-  callback
-){
-
-  let lastError =
-    null;
-
-
-  for(
-    let attempt = 1;
-    attempt <= CONFIG.maxRetries;
-    attempt++
-  ){
-
-    try{
-
-      console.log(
-        `${label} — attempt ${attempt}/${CONFIG.maxRetries}`
-      );
-
-
-      return await callback();
-
-
-    }catch(error){
-
-      lastError =
-        error;
-
-
-      console.error(
-        `${label} failed:`,
-        error.message
-      );
-
-
-      if(
-        attempt <
-        CONFIG.maxRetries
-      ){
-
-        await sleep(
-          CONFIG.retryDelay *
-          attempt
-        );
-
-      }
-
-    }
-
-  }
-
-
-  throw lastError;
-
-}
-
-
 // ============================================================
 // READ anime-ids.json
 // ============================================================
 
-function readAnimeList(){
+function readAnimeList() {
 
-  if(
-    !fs.existsSync(
-      ID_FILE
-    )
-  ){
+  if (
+    !fs.existsSync(ID_FILE)
+  ) {
 
     throw new Error(
       "anime-ids.json was not found."
@@ -386,25 +304,20 @@ function readAnimeList(){
 
   }
 
-
   const raw =
     fs.readFileSync(
       ID_FILE,
       "utf8"
     );
 
-
   let parsed;
 
-
-  try{
+  try {
 
     parsed =
-      JSON.parse(
-        raw
-      );
+      JSON.parse(raw);
 
-  }catch(error){
+  } catch {
 
     throw new Error(
       "anime-ids.json contains invalid JSON."
@@ -412,12 +325,9 @@ function readAnimeList(){
 
   }
 
-
-  if(
-    !Array.isArray(
-      parsed
-    )
-  ){
+  if (
+    !Array.isArray(parsed)
+  ) {
 
     throw new Error(
       "anime-ids.json must contain an array."
@@ -425,97 +335,66 @@ function readAnimeList(){
 
   }
 
-
   return parsed;
 
 }
 
-
 // ============================================================
 // NORMALIZE ID ENTRY
 // ============================================================
-//
-// Chấp nhận:
-//
-// {
-//   "id": 21,
-//   "name": "ONE PIECE"
-// }
-//
-// ============================================================
 
-function normalizeIdEntry(
-  entry
-){
+function normalizeIdEntry(entry) {
 
-  if(
+  if (
     !entry ||
     typeof entry !== "object"
-  ){
+  ) {
 
     return null;
 
   }
-
 
   const id =
-    Number(
-      entry.id
-    );
+    Number(entry.id);
 
-
-  if(
+  if (
     !Number.isInteger(id) ||
     id <= 0
-  ){
+  ) {
 
     return null;
 
   }
-
 
   const name =
     typeof entry.name === "string"
       ? entry.name.trim()
       : "";
 
-
   return {
-
     id,
-
     name
-
   };
 
 }
 
-
 // ============================================================
-// REMOVE DUPLICATE IDS
+// NORMALIZE LIST
 // ============================================================
 
-function normalizeAnimeList(
-  list
-){
+function normalizeAnimeList(list) {
 
   const map =
     new Map();
 
-
-  for(
+  for (
     const entry of list
-  ){
+  ) {
 
     const normalized =
-      normalizeIdEntry(
-        entry
-      );
+      normalizeIdEntry(entry);
 
-
-    if(
-      !normalized
-    ){
+    if (!normalized) {
 
       console.warn(
         "Skipping invalid anime entry:",
@@ -526,12 +405,6 @@ function normalizeAnimeList(
 
     }
 
-
-    /*
-     * Nếu ID bị lặp:
-     * chỉ giữ một ID.
-     */
-
     map.set(
       normalized.id,
       normalized
@@ -539,33 +412,181 @@ function normalizeAnimeList(
 
   }
 
-
   return Array.from(
     map.values()
   );
 
 }
 
+// ============================================================
+// GET BEST NAME
+// ============================================================
+
+function getBestName(anime) {
+
+  if (
+    !anime ||
+    !anime.title
+  ) {
+
+    return "";
+
+  }
+
+  return (
+    anime.title.english ||
+    anime.title.romaji ||
+    anime.title.native ||
+    ""
+  ).trim();
+
+}
 
 // ============================================================
-// FETCH ONE ANIME FROM ANILIST
+// CREATE TIMEOUT
 // ============================================================
 
-async function fetchAnime(
-  id
-){
+function createTimeoutSignal(
+  milliseconds
+) {
 
-  return await withRetry(
-    `AniList ID ${id}`,
-    async function(){
+  const controller =
+    new AbortController();
+
+  const timer =
+    setTimeout(
+      () => controller.abort(),
+      milliseconds
+    );
+
+  return {
+    signal:
+      controller.signal,
+    clear:
+      () => clearTimeout(timer)
+  };
+
+}
+
+// ============================================================
+// ANILIST ERROR
+// ============================================================
+
+function createHttpError(
+  status,
+  message,
+  retryAfter
+) {
+
+  const error =
+    new Error(message);
+
+  error.httpStatus =
+    status;
+
+  if (
+    retryAfter !== undefined
+  ) {
+
+    error.retryAfter =
+      retryAfter;
+
+  }
+
+  return error;
+
+}
+
+// ============================================================
+// RETRY DELAY
+// ============================================================
+
+function getRetryAfterMilliseconds(
+  error,
+  attempt
+) {
+
+  // ----------------------------------------------------------
+  // AniList 429
+  // ----------------------------------------------------------
+
+  if (
+    error.httpStatus === 429
+  ) {
+
+    if (
+      Number.isFinite(
+        Number(error.retryAfter)
+      )
+    ) {
+
+      const seconds =
+        Number(error.retryAfter);
+
+      return Math.min(
+        Math.max(
+          seconds * 1000,
+          CONFIG.aniList429BaseDelay
+        ),
+        CONFIG.aniList429MaxDelay
+      );
+
+    }
+
+    return Math.min(
+      CONFIG.aniList429BaseDelay *
+      Math.pow(2, attempt - 1),
+      CONFIG.aniList429MaxDelay
+    );
+
+  }
+
+  // ----------------------------------------------------------
+  // Other temporary errors
+  // ----------------------------------------------------------
+
+  return (
+    CONFIG.aniListRetryBaseDelay *
+    Math.pow(2, attempt - 1)
+  );
+
+}
+
+// ============================================================
+// FETCH ONE ANIME
+// ============================================================
+
+async function fetchAnime(id) {
+
+  let lastError =
+    null;
+
+  for (
+    let attempt = 1;
+    attempt <= CONFIG.aniListMaxRetries;
+    attempt++
+  ) {
+
+    let timeout =
+      null;
+
+    try {
+
+      console.log(
+        `AniList ID ${id} — attempt ${attempt}/${CONFIG.aniListMaxRetries}`
+      );
+
+      timeout =
+        createTimeoutSignal(
+          CONFIG.aniListTimeout
+        );
 
       const response =
         await fetch(
           CONFIG.aniListURL,
           {
 
-            method:
-              "POST",
+            method: "POST",
 
             headers: {
 
@@ -584,66 +605,113 @@ async function fetchAnime(
                   ANILIST_QUERY,
 
                 variables: {
-
                   id
-
                 }
 
-              })
+              }),
+
+            signal:
+              timeout.signal
 
           }
         );
 
+      if (!response.ok) {
 
-      /*
-       * AniList HTTP error.
-       */
+        let retryAfter;
 
-      if(
-        !response.ok
-      ){
+        const retryHeader =
+          response.headers.get(
+            "retry-after"
+          );
 
-        throw new Error(
-          `AniList HTTP ${response.status}`
+        if (retryHeader) {
+
+          const numeric =
+            Number(retryHeader);
+
+          if (
+            Number.isFinite(numeric)
+          ) {
+
+            retryAfter =
+              numeric;
+
+          }
+
+        }
+
+        const status =
+          response.status;
+
+        const temporary =
+          status === 429 ||
+          status === 500 ||
+          status === 502 ||
+          status === 503 ||
+          status === 504;
+
+        const error =
+          createHttpError(
+            status,
+            `AniList HTTP ${status}`,
+            retryAfter
+          );
+
+        if (
+          !temporary ||
+          attempt >=
+            CONFIG.aniListMaxRetries
+        ) {
+
+          throw error;
+
+        }
+
+        lastError =
+          error;
+
+        const delay =
+          getRetryAfterMilliseconds(
+            error,
+            attempt
+          );
+
+        console.warn(
+          `AniList ID ${id} — HTTP ${status}. Waiting ${Math.ceil(delay / 1000)}s before retry.`
         );
 
-      }
+        await sleep(delay);
 
+        continue;
+
+      }
 
       const json =
         await response.json();
 
-
-      /*
-       * GraphQL error.
-       */
-
-      if(
-        Array.isArray(
-          json.errors
-        ) &&
+      if (
+        Array.isArray(json.errors) &&
         json.errors.length > 0
-      ){
+      ) {
 
-        throw new Error(
+        const message =
           json.errors
             .map(
               error =>
                 error.message
             )
-            .join("; ")
+            .join("; ");
+
+        throw new Error(
+          `AniList GraphQL error: ${message}`
         );
 
       }
 
-
-      /*
-       * Không có data.
-       */
-
-      if(
+      if (
         !json.data
-      ){
+      ) {
 
         throw new Error(
           "AniList returned no data."
@@ -651,274 +719,325 @@ async function fetchAnime(
 
       }
 
-
-      /*
-       * ID không tồn tại hoặc
-       * không phải anime.
-       */
-
-      if(
+      if (
         !json.data.Media
-      ){
+      ) {
 
         return null;
 
       }
 
-
       return json.data.Media;
 
+    } catch (error) {
+
+      lastError =
+        error;
+
+      // ------------------------------------------------------
+      // Timeout / network error
+      // ------------------------------------------------------
+
+      const isAbort =
+        error &&
+        error.name ===
+          "AbortError";
+
+      const isNetwork =
+        !error.httpStatus;
+
+      if (
+        attempt >=
+        CONFIG.aniListMaxRetries
+      ) {
+
+        throw error;
+
+      }
+
+      if (
+        error.httpStatus &&
+        ![
+          429,
+          500,
+          502,
+          503,
+          504
+        ].includes(
+          error.httpStatus
+        )
+      ) {
+
+        throw error;
+
+      }
+
+      let delay;
+
+      if (
+        isAbort ||
+        isNetwork
+      ) {
+
+        delay =
+          CONFIG.aniListRetryBaseDelay *
+          Math.pow(
+            2,
+            attempt - 1
+          );
+
+      } else {
+
+        delay =
+          getRetryAfterMilliseconds(
+            error,
+            attempt
+          );
+
+      }
+
+      console.warn(
+        `AniList ID ${id} — ${isAbort ? "timeout" : error.message}. Waiting ${Math.ceil(delay / 1000)}s before retry.`
+      );
+
+      await sleep(delay);
+
+    } finally {
+
+      if (timeout) {
+
+        timeout.clear();
+
+      }
+
     }
-  );
-
-}
-
-
-// ============================================================
-// GET BEST DISPLAY NAME
-// ============================================================
-
-function getBestName(
-  anime
-){
-
-  if(
-    !anime ||
-    !anime.title
-  ){
-
-    return "";
 
   }
 
+  throw lastError ||
+    new Error(
+      `AniList ID ${id} failed.`
+    );
 
-  return (
-
-    anime.title.english ||
-
-    anime.title.romaji ||
-
-    anime.title.native ||
-
-    ""
-
-  ).trim();
-
-}
-
+      }
 
 // ============================================================
-// NORMALIZE ANILIST DATA
-// ============================================================
-//
-// Chỉ lưu những trường countdown cần.
-//
-// Không lưu toàn bộ Media object.
-//
-// Điều này giúp JSON R2 nhẹ hơn và ổn định hơn.
-//
+// NORMALIZE ANIME DATA
 // ============================================================
 
-function normalizeAnime(
-  anime
-){
+function normalizeAnime(anime) {
 
-  if(
+  if (
     !anime ||
-    !Number.isInteger(
-      Number(anime.id)
-    )
-  ){
+    typeof anime !== "object"
+  ) {
 
     return null;
 
   }
 
-
   const id =
-    Number(
-      anime.id
-    );
+    Number(anime.id);
 
+  if (
+    !Number.isInteger(id) ||
+    id <= 0
+  ) {
 
-  let episodes =
-    null;
-
-
-  if(
-    anime.episodes !== null &&
-    anime.episodes !== undefined
-  ){
-
-    const value =
-      Number(
-        anime.episodes
-      );
-
-
-    if(
-      Number.isFinite(value) &&
-      value >= 0
-    ){
-
-      episodes =
-        value;
-
-    }
+    return null;
 
   }
 
+  const title =
+    anime.title &&
+    typeof anime.title === "object"
 
-  let duration =
-    null;
+      ? {
 
+          romaji:
+            anime.title.romaji ||
+            null,
 
-  if(
-    anime.duration !== null &&
-    anime.duration !== undefined
-  ){
+          english:
+            anime.title.english ||
+            null,
 
-    const value =
-      Number(
-        anime.duration
-      );
+          native:
+            anime.title.native ||
+            null
 
+        }
 
-    if(
-      Number.isFinite(value) &&
-      value > 0
-    ){
+      : {
 
-      duration =
-        value;
+          romaji:
+            null,
 
-    }
+          english:
+            null,
 
-  }
+          native:
+            null
 
+        };
 
-  let nextAiringEpisode =
-    null;
+  const startDate =
+    anime.startDate &&
+    typeof anime.startDate === "object"
 
+      ? {
 
-  if(
-    anime.nextAiringEpisode
-  ){
+          year:
+            anime.startDate.year ??
+            null,
 
-    const episode =
-      Number(
-        anime.nextAiringEpisode.episode
-      );
+          month:
+            anime.startDate.month ??
+            null,
 
+          day:
+            anime.startDate.day ??
+            null
 
-    const airingAt =
-      Number(
-        anime.nextAiringEpisode.airingAt
-      );
+        }
 
+      : null;
 
-    /*
-     * Chỉ nhận nextAiringEpisode
-     * nếu cả episode và airingAt
-     * đều hợp lệ.
-     */
+  const endDate =
+    anime.endDate &&
+    typeof anime.endDate === "object"
 
-    if(
-      Number.isInteger(
-        episode
-      ) &&
-      episode > 0 &&
-      Number.isFinite(
-        airingAt
-      ) &&
-      airingAt > 0
-    ){
+      ? {
 
-      nextAiringEpisode = {
+          year:
+            anime.endDate.year ??
+            null,
 
-        episode,
+          month:
+            anime.endDate.month ??
+            null,
 
-        airingAt
+          day:
+            anime.endDate.day ??
+            null
 
-      };
+        }
 
-    }
+      : null;
 
-  }
+  const nextAiringEpisode =
+    anime.nextAiringEpisode &&
+    typeof anime.nextAiringEpisode === "object"
 
+      ? {
+
+          airingAt:
+            anime.nextAiringEpisode.airingAt ??
+            null,
+
+          episode:
+            anime.nextAiringEpisode.episode ??
+            null
+
+        }
+
+      : null;
 
   return {
 
     id,
 
-    title: {
-
-      romaji:
-        anime.title?.romaji ||
-        null,
-
-      english:
-        anime.title?.english ||
-        null,
-
-      native:
-        anime.title?.native ||
-        null
-
-    },
+    title,
 
     status:
       anime.status ||
-      "UNKNOWN",
+      null,
 
-    episodes,
+    episodes:
+      anime.episodes ??
+      null,
 
-    duration,
+    duration:
+      anime.duration ??
+      null,
 
-    startDate:
-      anime.startDate || null,
+    startDate,
 
-    endDate:
-      anime.endDate || null,
+    endDate,
 
     season:
       anime.season ||
       null,
 
     seasonYear:
-      anime.seasonYear ||
+      anime.seasonYear ??
       null,
 
     nextAiringEpisode,
 
     updatedAt:
-      Number.isFinite(
-        Number(
-          anime.updatedAt
-        )
-      )
-        ? Number(
-            anime.updatedAt
-          )
-        : null
+      anime.updatedAt ??
+      null
 
   };
 
 }
 
+// ============================================================
+// VALIDATE ANIME DATA
+// ============================================================
+
+function isValidAnime(anime, expectedId) {
+
+  if (
+    !anime ||
+    typeof anime !== "object"
+  ) {
+
+    return false;
+
+  }
+
+  if (
+    Number(anime.id) !==
+    Number(expectedId)
+  ) {
+
+    return false;
+
+  }
+
+  if (
+    !anime.title ||
+    typeof anime.title !== "object"
+  ) {
+
+    return false;
+
+  }
+
+  const hasName =
+    Boolean(
+      anime.title.romaji ||
+      anime.title.english ||
+      anime.title.native
+    );
+
+  if (!hasName) {
+
+    return false;
+
+  }
+
+  return true;
+
+}
 
 // ============================================================
 // CREATE R2 BODY
 // ============================================================
 
-function createR2Body(
-  anime
-){
-
-  /*
-   * JSON.stringify với indentation
-   * để file R2 dễ kiểm tra bằng mắt.
-   */
+function createR2Body(anime) {
 
   return JSON.stringify(
     anime,
@@ -928,28 +1047,75 @@ function createR2Body(
 
 }
 
+// ============================================================
+// R2 RETRY DELAY
+// ============================================================
+
+function getR2RetryDelay(attempt) {
+
+  return (
+    CONFIG.r2RetryDelay *
+    Math.pow(
+      2,
+      attempt - 1
+    )
+  );
+
+}
 
 // ============================================================
-// SAVE ONE ANIME TO R2
+// SAVE ANIME TO R2
+// ============================================================
+//
+// Important:
+//
+// Chỉ gọi hàm này sau khi dữ liệu AniList đã được validate.
+//
+// Nếu upload thất bại:
+// - retry
+// - không xóa file cũ
+// - không ghi dữ liệu rỗng
+//
 // ============================================================
 
 async function saveAnimeToR2(
   anime
-){
+) {
+
+  const id =
+    Number(anime.id);
 
   const key =
-    `anime/${anime.id}.json`;
-
+    `anime/${id}.json`;
 
   const body =
-    createR2Body(
-      anime
+    createR2Body(anime);
+
+  if (
+    !body ||
+    body.length < 20
+  ) {
+
+    throw new Error(
+      `Refusing to upload invalid data for anime ${id}.`
     );
 
+  }
 
-  await withRetry(
-    `R2 ${key}`,
-    async function(){
+  let lastError =
+    null;
+
+  for (
+    let attempt = 1;
+    attempt <= CONFIG.r2MaxRetries;
+    attempt++
+  ) {
+
+    try {
+
+      console.log(
+        `R2 ${key} — upload attempt ${attempt}/${CONFIG.r2MaxRetries}`
+      );
 
       await r2.send(
 
@@ -974,440 +1140,471 @@ async function saveAnimeToR2(
 
       );
 
-    }
-  );
-
-
-  console.log(
-    `R2 saved: ${key}`
-  );
-
-}
-
-
-// ============================================================
-// PART 1 COMPLETE
-// ============================================================
-//
-// Phần 2 sẽ:
-//   - xử lý từng ID
-//   - tự cập nhật name trong anime-ids.json
-//   - không làm mất ID cũ nếu AniList tạm lỗi
-//   - thống kê thành công/thất bại
-//
-// ============================================================
-
-// ============================================================
-// WHY2YUE — UPDATE CACHE
-// update-cache.js
-// PART 2/2
-//
-// Phần này:
-//   - xử lý từng AniList ID
-//   - lấy dữ liệu mới nhất
-//   - cập nhật tên anime
-//   - ghi JSON vào R2
-//   - KHÔNG xóa anime cũ
-//   - nếu 1 anime lỗi, các anime khác vẫn tiếp tục
-//   - chỉ kết thúc workflow khi hoàn tất toàn bộ danh sách
-// ============================================================
-
-
-// ============================================================
-// UPDATE NAME IN anime-ids.json
-// ============================================================
-//
-// Ví dụ file ban đầu:
-//
-// [
-//   {
-//     "id": 21,
-//     "name": "ONE PIECE"
-//   },
-//   {
-//     "id": 196017,
-//     "name": "Anime 196017"
-//   }
-// ]
-//
-// Nếu AniList trả về tên mới:
-//
-// name sẽ được tự động cập nhật.
-//
-// ============================================================
-
-function updateLocalAnimeNames(
-  originalList,
-  animeResults
-){
-
-  const resultMap =
-    new Map();
-
-
-  /*
-   * Tạo map:
-   *
-   * ID → tên AniList
-   */
-
-  for(
-    const result of animeResults
-  ){
-
-    if(
-      !result ||
-      !result.anime
-    ){
-
-      continue;
-
-    }
-
-
-    const anime =
-      result.anime;
-
-
-    const name =
-      getBestName(
-        anime
+      console.log(
+        `R2 ${key} — uploaded successfully.`
       );
 
+      return true;
 
-    if(
-      name
-    ){
+    } catch (error) {
 
-      resultMap.set(
-        anime.id,
-        name
+      lastError =
+        error;
+
+      if (
+        attempt >=
+        CONFIG.r2MaxRetries
+      ) {
+
+        break;
+
+      }
+
+      const delay =
+        getR2RetryDelay(
+          attempt
+        );
+
+      console.warn(
+        `R2 ${key} — upload failed: ${error.message}`
       );
+
+      console.warn(
+        `R2 ${key} — retrying in ${Math.ceil(delay / 1000)}s...`
+      );
+
+      await sleep(delay);
 
     }
 
   }
 
+  throw (
+    lastError ||
+    new Error(
+      `R2 upload failed for ${key}.`
+    )
+  );
 
-  /*
-   * Giữ nguyên thứ tự trong
-   * anime-ids.json.
-   */
+}
+
+// ============================================================
+// READ PREVIOUS anime-ids.json FROM GIT
+// ============================================================
+//
+// Dùng khi workflow chạy bằng PUSH.
+//
+// Ví dụ:
+//
+// commit trước:
+//
+// [
+//   { "id": 21 },
+//   { "id": 20 }
+// ]
+//
+// commit mới:
+//
+// [
+//   { "id": 21 },
+//   { "id": 20 },
+//   { "id": 196017 }
+// ]
+//
+// → chỉ xử lý:
+//
+// 196017
+//
+// ============================================================
+
+function getPreviousAnimeList() {
+
+  const before =
+    process.env.GITHUB_EVENT_BEFORE;
+
+  const sha =
+    process.env.GITHUB_SHA;
+
+  if (
+    !before ||
+    !sha
+  ) {
+
+    return null;
+
+  }
+
+  // ----------------------------------------------------------
+  // Initial commit
+  // ----------------------------------------------------------
+
+  if (
+    /^0+$/.test(before)
+  ) {
+
+    return null;
+
+  }
+
+  try {
+
+    const previousRaw =
+      execFileSync(
+        "git",
+        [
+          "show",
+          `${before}:anime-ids.json`
+        ],
+        {
+          encoding:
+            "utf8"
+        }
+      );
+
+    const parsed =
+      JSON.parse(
+        previousRaw
+      );
+
+    if (
+      !Array.isArray(parsed)
+    ) {
+
+      return null;
+
+    }
+
+    return normalizeAnimeList(
+      parsed
+    );
+
+  } catch (error) {
+
+    console.warn(
+      "Could not read previous anime-ids.json from Git."
+    );
+
+    console.warn(
+      error.message
+    );
+
+    return null;
+
+  }
+
+}
+
+// ============================================================
+// FIND NEW ANIME IDS
+// ============================================================
+
+function getNewAnimeList(
+  currentList
+) {
+
+  const previousList =
+    getPreviousAnimeList();
+
+  // ----------------------------------------------------------
+  // Không có lịch sử để so sánh
+  //
+  // Trường hợp:
+  // - initial commit
+  // - git history không đủ
+  // - không có GITHUB_EVENT_BEFORE
+  //
+  // → xử lý toàn bộ danh sách.
+  // ----------------------------------------------------------
+
+  if (
+    previousList === null
+  ) {
+
+    console.log(
+      "Previous anime list unavailable. Processing current list."
+    );
+
+    return currentList;
+
+  }
+
+  const previousIds =
+    new Set(
+      previousList.map(
+        anime =>
+          Number(anime.id)
+      )
+    );
+
+  const newAnime =
+    currentList.filter(
+      anime =>
+        !previousIds.has(
+          Number(anime.id)
+        )
+    );
+
+  return newAnime;
+
+}
+
+// ============================================================
+// UPDATE LOCAL ANIME NAMES
+// ============================================================
+//
+// Nếu anime-ids.json có:
+//
+// {
+//   "id": 196017,
+//   "name": "Anime 196017"
+// }
+//
+// Sau khi AniList trả về:
+//
+// "ONE PIECE..."
+//
+// thì thay name bằng tên thật.
+//
+// ============================================================
+
+function updateLocalAnimeNames(
+  animeList,
+  results
+) {
+
+  let changed =
+    false;
+
+  const resultMap =
+    new Map();
+
+  for (
+    const result of results
+  ) {
+
+    if (
+      !result ||
+      !result.anime
+    ) {
+
+      continue;
+
+    }
+
+    const anime =
+      result.anime;
+
+    const id =
+      Number(anime.id);
+
+    const bestName =
+      getBestName(anime);
+
+    if (
+      !bestName
+    ) {
+
+      continue;
+
+    }
+
+    resultMap.set(
+      id,
+      bestName
+    );
+
+  }
 
   const updatedList =
-    originalList.map(
+    animeList.map(
       entry => {
 
-        const normalized =
-          normalizeIdEntry(
-            entry
-          );
+        const id =
+          Number(entry.id);
 
+        const newName =
+          resultMap.get(id);
 
-        /*
-         * Entry không hợp lệ:
-         * giữ nguyên để dễ phát hiện
-         * và không tự ý xóa dữ liệu.
-         */
-
-        if(
-          !normalized
-        ){
+        if (
+          !newName
+        ) {
 
           return entry;
 
         }
 
+        const oldName =
+          typeof entry.name === "string"
+            ? entry.name.trim()
+            : "";
 
-        const newName =
-          resultMap.get(
-            normalized.id
-          );
+        if (
+          oldName === newName
+        ) {
 
-
-        /*
-         * Có tên mới từ AniList:
-         * cập nhật.
-         */
-
-        if(
-          newName
-        ){
-
-          return {
-
-            id:
-              normalized.id,
-
-            name:
-              newName
-
-          };
+          return entry;
 
         }
 
+        changed =
+          true;
 
-        /*
-         * AniList tạm lỗi:
-         * giữ tên cũ.
-         */
+        console.log(
+          `Anime ${id}: "${oldName}" → "${newName}"`
+        );
 
         return {
 
-          id:
-            normalized.id,
+          ...entry,
 
           name:
-            normalized.name
+            newName
 
         };
 
       }
     );
 
-
-  /*
-   * Ghi lại file nếu có thay đổi.
-   */
-
-  const newContent =
-    JSON.stringify(
-      updatedList,
-      null,
-      2
-    ) +
-    "\n";
-
-
-  const oldContent =
-    fs.readFileSync(
-      ID_FILE,
-      "utf8"
-    );
-
-
-  if(
-    oldContent !==
-    newContent
-  ){
+  if (
+    changed
+  ) {
 
     fs.writeFileSync(
-      ID_FILE,
-      newContent,
-      "utf8"
-    );
 
+      ID_FILE,
+
+      JSON.stringify(
+        updatedList,
+        null,
+        2
+      ) + "\n",
+
+      "utf8"
+
+    );
 
     console.log(
       "anime-ids.json updated."
     );
 
-  }else{
-
-    console.log(
-      "anime-ids.json unchanged."
-    );
-
   }
+
+  return changed;
 
 }
 
-
 // ============================================================
-// PROCESS ONE ENTRY
+// PROCESS ONE ANIME
 // ============================================================
 //
-// Một ID lỗi không được làm chết toàn bộ workflow.
+// Quan trọng:
 //
-// Ví dụ:
+// Hàm này KHÔNG throw ra ngoài sau khi xử lý lỗi.
 //
-// 21       → OK
-// 196017   → OK
-// 99999999 → lỗi
+// Nó trả về:
 //
-// Kết quả:
-// 21 và 196017 vẫn được cập nhật.
+// {
+//   success: true/false,
+//   id,
+//   anime,
+//   error
+// }
+//
+// Vì vậy một anime lỗi sẽ không làm chết cả batch.
+//
 // ============================================================
 
 async function processAnime(
   entry
-){
+) {
 
   const id =
-    entry.id;
+    Number(entry.id);
 
-
+  console.log("");
   console.log(
-    ""
+    "============================================================"
   );
 
-
   console.log(
-    "--------------------------------------------------"
+    `Processing anime ID: ${id}`
   );
 
-
   console.log(
-    `Processing AniList ID: ${id}`
+    "============================================================"
   );
 
+  try {
 
-  console.log(
-    "--------------------------------------------------"
-  );
-
-
-  try{
-
-    /*
-     * 1. Lấy dữ liệu mới nhất
-     * trực tiếp từ AniList.
-     */
+    // --------------------------------------------------------
+    // 1. Fetch AniList
+    // --------------------------------------------------------
 
     const rawAnime =
-      await fetchAnime(
-        id
-      );
+      await fetchAnime(id);
 
+    // --------------------------------------------------------
+    // 2. AniList không tìm thấy
+    // --------------------------------------------------------
 
-    /*
-     * AniList không tìm thấy ID.
-     */
-
-    if(
-      !rawAnime
-    ){
-
-      console.error(
-        `AniList ID ${id} was not found.`
-      );
-
-
-      return {
-
-        id,
-
-        success:
-          false,
-
-        anime:
-          null,
-
-        error:
-          "Anime not found"
-
-      };
-
-    }
-
-
-    /*
-     * Kiểm tra ID trả về.
-     *
-     * Không bao giờ ghi dữ liệu
-     * của anime khác vào anime/{id}.json.
-     */
-
-    if(
-      Number(
-        rawAnime.id
-      ) !== id
-    ){
+    if (
+      rawAnime === null
+    ) {
 
       throw new Error(
-        `AniList returned unexpected ID ${rawAnime.id}`
+        `AniList anime ${id} was not found.`
       );
 
     }
 
-
-    /*
-     * 2. Chuẩn hóa dữ liệu.
-     */
+    // --------------------------------------------------------
+    // 3. Normalize
+    // --------------------------------------------------------
 
     const anime =
       normalizeAnime(
         rawAnime
       );
 
+    // --------------------------------------------------------
+    // 4. Validate
+    // --------------------------------------------------------
 
-    if(
-      !anime
-    ){
+    if (
+      !isValidAnime(
+        anime,
+        id
+      )
+    ) {
 
       throw new Error(
-        "Failed to normalize AniList data."
+        `Invalid AniList data for anime ${id}.`
       );
 
     }
 
-
-    /*
-     * 3. Ghi đúng file:
-     *
-     * anime/21.json
-     *
-     * hoặc:
-     *
-     * anime/196017.json
-     */
+    // --------------------------------------------------------
+    // 5. Save R2
+    // --------------------------------------------------------
 
     await saveAnimeToR2(
       anime
     );
 
-
-    /*
-     * 4. In thông tin để GitHub Actions
-     * dễ kiểm tra.
-     */
-
-    const title =
-      getBestName(
-        anime
-      ) ||
-      entry.name ||
-      `Anime ${id}`;
-
+    // --------------------------------------------------------
+    // SUCCESS
+    // --------------------------------------------------------
 
     console.log(
-      `Anime: ${title}`
+      `Anime ${id} completed successfully.`
     );
-
-
-    console.log(
-      `Status: ${anime.status}`
-    );
-
-
-    if(
-      anime.nextAiringEpisode
-    ){
-
-      console.log(
-        `Next episode: ${anime.nextAiringEpisode.episode}`
-      );
-
-
-      console.log(
-        `AiringAt: ${anime.nextAiringEpisode.airingAt}`
-      );
-
-    }else{
-
-      console.log(
-        "Next episode: none"
-      );
-
-    }
-
 
     return {
 
-      id,
-
       success:
         true,
+
+      id,
 
       anime,
 
@@ -1416,30 +1613,22 @@ async function processAnime(
 
     };
 
+  } catch (error) {
 
-  }catch(error){
+    // --------------------------------------------------------
+    // FAILURE
+    // --------------------------------------------------------
 
     console.error(
-      `Anime ${id} FAILED:`,
-      error.message
+      `Anime ${id} failed: ${error.message}`
     );
-
-
-    /*
-     * QUAN TRỌNG:
-     *
-     * Không xóa file R2 cũ.
-     *
-     * Nếu anime/21.json đã tồn tại
-     * từ lần chạy trước thì nó vẫn còn.
-     */
 
     return {
 
-      id,
-
       success:
         false,
+
+      id,
 
       anime:
         null,
@@ -1451,134 +1640,110 @@ async function processAnime(
 
   }
 
-}
-
+        }
 
 // ============================================================
-// MAIN
+// PROCESS ANIME LIST
 // ============================================================
 
-async function main(){
+async function processAnimeList(
+  animeList
+) {
 
+  const results = [];
+
+  const total =
+    animeList.length;
+
+  console.log("");
   console.log(
-    ""
+    "============================================================"
   );
 
+  console.log(
+    `Starting anime processing`
+  );
+
+  console.log(
+    `Mode: ${UPDATE_MODE}`
+  );
+
+  console.log(
+    `Total anime to process: ${total}`
+  );
 
   console.log(
     "============================================================"
   );
 
+  // ----------------------------------------------------------
+  // Không có anime cần xử lý
+  // ----------------------------------------------------------
 
-  console.log(
-    "WHY2YUE — ANIME CACHE UPDATE START"
-  );
+  if (
+    total === 0
+  ) {
 
-
-  console.log(
-    "============================================================"
-  );
-
-
-  console.log(
-    `Started: ${new Date().toISOString()}`
-  );
-
-
-  console.log(
-    ""
-  );
-
-
-  // ==========================================================
-  // 1. ĐỌC DANH SÁCH ID
-  // ==========================================================
-
-  const originalList =
-    readAnimeList();
-
-
-  console.log(
-    `Entries in anime-ids.json: ${originalList.length}`
-  );
-
-
-  // ==========================================================
-  // 2. CHUẨN HÓA ID
-  // ==========================================================
-
-  const animeList =
-    normalizeAnimeList(
-      originalList
+    console.log(
+      "No anime needs processing."
     );
 
-
-  if(
-    animeList.length === 0
-  ){
-
-    throw new Error(
-      "anime-ids.json contains no valid AniList IDs."
-    );
+    return results;
 
   }
 
+  // ----------------------------------------------------------
+  // Sequential processing
+  // ----------------------------------------------------------
+  //
+  // Cố ý KHÔNG dùng Promise.all().
+  //
+  // Mục đích:
+  // - giảm áp lực AniList
+  // - tránh 429
+  // - dễ kiểm soát
+  // - một anime lỗi không ảnh hưởng anime tiếp theo
+  //
+  // ----------------------------------------------------------
 
-  console.log(
-    `Valid unique AniList IDs: ${animeList.length}`
-  );
-
-
-  console.log(
-    ""
-  );
-
-
-  // ==========================================================
-  // 3. XỬ LÝ TỪNG ANIME
-  // ==========================================================
-
-  const results =
-    [];
-
-
-  for(
-    let i = 0;
-    i < animeList.length;
-    i++
-  ){
+  for (
+    let index = 0;
+    index < total;
+    index++
+  ) {
 
     const entry =
-      animeList[i];
+      animeList[index];
 
+    console.log("");
 
     console.log(
-      `Progress: ${i + 1}/${animeList.length}`
+      `[${index + 1}/${total}] Anime ID ${entry.id}`
     );
-
 
     const result =
       await processAnime(
         entry
       );
 
-
     results.push(
       result
     );
 
+    // --------------------------------------------------------
+    // Delay giữa các anime
+    //
+    // Không delay sau anime cuối cùng.
+    // --------------------------------------------------------
 
-    /*
-     * Nghỉ nhẹ giữa các ID.
-     *
-     * Không cần tải hàng nghìn anime.
-     * Chỉ tải những ID bạn đã thêm.
-     */
+    if (
+      index <
+      total - 1
+    ) {
 
-    if(
-      i <
-      animeList.length - 1
-    ){
+      console.log(
+        `Waiting ${CONFIG.animeDelay / 1000}s before next anime...`
+      );
 
       await sleep(
         CONFIG.animeDelay
@@ -1588,34 +1753,61 @@ async function main(){
 
   }
 
+  return results;
 
-  // ==========================================================
-  // 4. CẬP NHẬT TÊN
-  // ==========================================================
-  //
-  // Chỉ cập nhật tên dựa trên những anime
-  // AniList lấy thành công.
-  //
-  // Anime lỗi vẫn giữ tên cũ.
-  //
-  // ==========================================================
+}
 
-  updateLocalAnimeNames(
-    originalList,
-    results
+// ============================================================
+// PRINT ANIME RESULT
+// ============================================================
+
+function printAnimeResult(
+  result
+) {
+
+  if (
+    result.success
+  ) {
+
+    const anime =
+      result.anime;
+
+    const title =
+      getBestName(
+        anime
+      ) ||
+      `ID ${result.id}`;
+
+    console.log(
+      `✓ ${result.id} — ${title}`
+    );
+
+    return;
+
+  }
+
+  console.log(
+    `✗ ${result.id} — ${result.error || "Unknown error"}`
   );
 
+}
 
-  // ==========================================================
-  // 5. THỐNG KÊ
-  // ==========================================================
+// ============================================================
+// PRINT SUMMARY
+// ============================================================
 
-  const successful =
+function printSummary(
+  results
+) {
+
+  const total =
+    results.length;
+
+  const success =
     results.filter(
       result =>
         result.success
     );
-
 
   const failed =
     results.filter(
@@ -1623,91 +1815,324 @@ async function main(){
         !result.success
     );
 
-
+  console.log("");
+  console.log("");
   console.log(
-    ""
+    "============================================================"
   );
 
+  console.log(
+    "WHY2YUE — ANIME CACHE SUMMARY"
+  );
 
   console.log(
     "============================================================"
   );
 
-
   console.log(
-    "UPDATE SUMMARY"
+    `Mode:     ${UPDATE_MODE}`
   );
 
+  console.log(
+    `Total:    ${total}`
+  );
+
+  console.log(
+    `Success:  ${success.length}`
+  );
+
+  console.log(
+    `Failed:   ${failed.length}`
+  );
 
   console.log(
     "============================================================"
   );
 
+  // ----------------------------------------------------------
+  // Successful anime
+  // ----------------------------------------------------------
 
-  console.log(
-    `Total IDs: ${results.length}`
-  );
+  if (
+    success.length > 0
+  ) {
 
-
-  console.log(
-    `Successful: ${successful.length}`
-  );
-
-
-  console.log(
-    `Failed: ${failed.length}`
-  );
-
-
-  // ==========================================================
-  // 6. IN DANH SÁCH LỖI
-  // ==========================================================
-
-  if(
-    failed.length > 0
-  ){
-
+    console.log("");
     console.log(
-      ""
+      "Successful:"
     );
 
+    for (
+      const result of success
+    ) {
 
-    console.log(
-      "Failed IDs:"
-    );
-
-
-    for(
-      const result
-      of failed
-    ){
-
-      console.log(
-        `- ${result.id}: ${result.error}`
+      printAnimeResult(
+        result
       );
 
     }
 
   }
 
+  // ----------------------------------------------------------
+  // Failed anime
+  // ----------------------------------------------------------
+
+  if (
+    failed.length > 0
+  ) {
+
+    console.log("");
+    console.log(
+      "Failed:"
+    );
+
+    for (
+      const result of failed
+    ) {
+
+      printAnimeResult(
+        result
+      );
+
+    }
+
+    console.log("");
+    console.log(
+      "Failed IDs:"
+    );
+
+    console.log(
+      failed
+        .map(
+          result =>
+            result.id
+        )
+        .join(", ")
+    );
+
+  }
+
+  console.log("");
+  console.log(
+    "============================================================"
+  );
+
+  // ----------------------------------------------------------
+  // Cache safety reminder
+  // ----------------------------------------------------------
+
+  if (
+    failed.length > 0
+  ) {
+
+    console.log(
+      "IMPORTANT: Failed anime cache files were NOT deleted."
+    );
+
+    console.log(
+      "Existing valid R2 cache remains untouched for failed anime."
+    );
+
+  }
+
+  console.log(
+    "============================================================"
+  );
+
+}
+
+// ============================================================
+// MAIN
+// ============================================================
+
+async function main() {
+
+  console.log("");
+  console.log(
+    "############################################################"
+  );
+
+  console.log(
+    "# WHY2YUE — ANIME CACHE UPDATE"
+  );
+
+  console.log(
+    "############################################################"
+  );
+
+  console.log(
+    `Update mode: ${UPDATE_MODE}`
+  );
+
+  console.log(
+    `GitHub event: ${EVENT_NAME || "unknown"}`
+  );
+
+  console.log(
+    `Anime delay: ${CONFIG.animeDelay}ms`
+  );
+
+  console.log(
+    `AniList timeout: ${CONFIG.aniListTimeout}ms`
+  );
+
+  console.log(
+    "############################################################"
+  );
 
   // ==========================================================
-  // 7. KHÔNG CÓ ANIME NÀO THÀNH CÔNG
+  // 1. Read current anime list
+  // ==========================================================
+
+  const originalList =
+    readAnimeList();
+
+  console.log("");
+  console.log(
+    `anime-ids.json entries: ${originalList.length}`
+  );
+
+  // ==========================================================
+  // 2. Normalize current list
+  // ==========================================================
+
+  const currentList =
+    normalizeAnimeList(
+      originalList
+    );
+
+  console.log(
+    `Valid anime entries: ${currentList.length}`
+  );
+
+  // ==========================================================
+  // 3. Determine processing list
+  // ==========================================================
+
+  let animeToProcess;
+
+  if (
+    UPDATE_MODE ===
+    "incremental"
+  ) {
+
+    animeToProcess =
+      getNewAnimeList(
+        currentList
+      );
+
+    console.log("");
+    console.log(
+      `New anime IDs detected: ${animeToProcess.length}`
+    );
+
+  } else {
+
+    animeToProcess =
+      currentList;
+
+    console.log("");
+    console.log(
+      `Full update selected: ${animeToProcess.length} anime`
+    );
+
+  }
+
+  // ==========================================================
+  // 4. Incremental mode with no new anime
+  // ==========================================================
+
+  if (
+    animeToProcess.length === 0
+  ) {
+
+    console.log("");
+    console.log(
+      "No new anime IDs detected."
+    );
+
+    console.log(
+      "Nothing needs to be uploaded to R2."
+    );
+
+    console.log("");
+    console.log(
+      "Cache update finished successfully."
+    );
+
+    return;
+
+  }
+
+  // ==========================================================
+  // 5. Process anime
+  // ==========================================================
+
+  const results =
+    await processAnimeList(
+      animeToProcess
+    );
+
+  // ==========================================================
+  // 6. Update local names
   // ==========================================================
   //
-  // Đây là tình huống nguy hiểm.
+  // Chỉ anime lấy dữ liệu thành công mới được đổi tên.
   //
-  // Nếu tất cả request đều lỗi:
-  //
-  // KHÔNG được coi workflow là thành công.
-  //
-  // Nhưng cũng KHÔNG xóa dữ liệu R2.
+  // Anime lỗi:
+  // - giữ nguyên name cũ
+  // - không bị thay bằng undefined
+  // - không bị thay bằng null
   //
   // ==========================================================
 
-  if(
-    successful.length === 0
-  ){
+  updateLocalAnimeNames(
+    currentList,
+    results
+  );
+
+  // ==========================================================
+  // 7. Print result summary
+  // ==========================================================
+
+  printSummary(
+    results
+  );
+
+  // ==========================================================
+  // 8. Determine final workflow status
+  // ==========================================================
+
+  const successCount =
+    results.filter(
+      result =>
+        result.success
+    ).length;
+
+  const failedCount =
+    results.filter(
+      result =>
+        !result.success
+    ).length;
+
+  // ----------------------------------------------------------
+  // Tất cả thất bại
+  // ----------------------------------------------------------
+  //
+  // Đây là lỗi nghiêm trọng.
+  //
+  // Workflow phải fail để GitHub Actions báo đỏ.
+  //
+  // Tuy nhiên R2 cũ vẫn được giữ nguyên vì processAnime()
+  // không xóa cache trước đó.
+  //
+  // ----------------------------------------------------------
+
+  if (
+    results.length > 0 &&
+    successCount === 0
+  ) {
 
     throw new Error(
       "All anime updates failed. Existing R2 cache was preserved."
@@ -1715,99 +2140,102 @@ async function main(){
 
   }
 
+  // ----------------------------------------------------------
+  // Có một phần thành công
+  // ----------------------------------------------------------
+  //
+  // Workflow vẫn thành công.
+  //
+  // Các anime thành công đã được cập nhật.
+  // Các anime thất bại vẫn giữ cache cũ.
+  //
+  // ----------------------------------------------------------
 
-  // ==========================================================
-  // 8. HOÀN TẤT
-  // ==========================================================
+  if (
+    failedCount > 0
+  ) {
 
+    console.warn("");
+
+    console.warn(
+      `${failedCount} anime failed, but ${successCount} anime succeeded.`
+    );
+
+    console.warn(
+      "The failed anime cache files were preserved."
+    );
+
+  }
+
+  console.log("");
   console.log(
-    ""
+    "############################################################"
   );
 
-
   console.log(
-    "============================================================"
+    "# CACHE UPDATE FINISHED"
   );
 
-
   console.log(
-    "WHY2YUE — ANIME CACHE UPDATE FINISHED"
+    "############################################################"
   );
-
-
-  console.log(
-    "============================================================"
-  );
-
-
-  console.log(
-    `Finished: ${new Date().toISOString()}`
-  );
-
-
-  console.log(
-    ""
-  );
-
-
-  console.log(
-    "R2 cache is ready."
-  );
-
-
-  /*
-   * Nếu có một vài ID lỗi:
-   *
-   * Workflow vẫn hoàn thành phần còn lại.
-   *
-   * Các file R2 cũ của ID lỗi vẫn được giữ.
-   */
 
 }
 
+// ============================================================
+// GLOBAL ERROR HANDLER
+// ============================================================
+
+process.on(
+  "unhandledRejection",
+  error => {
+
+    console.error("");
+    console.error(
+      "Unhandled promise rejection:"
+    );
+
+    console.error(
+      error
+    );
+
+    process.exitCode =
+      1;
+
+  }
+);
 
 // ============================================================
-// START
+// RUN
 // ============================================================
 
 main()
-
   .catch(
     error => {
 
+      console.error("");
       console.error(
-        ""
+        "============================================================"
       );
 
+      console.error(
+        "FATAL ERROR"
+      );
 
       console.error(
         "============================================================"
       );
 
-
       console.error(
-        "WHY2YUE — CACHE UPDATE FAILED"
+        error.message
       );
-
 
       console.error(
         "============================================================"
       );
 
-
-      console.error(
-        error
-      );
-
-
-      /*
-       * Exit code 1 để GitHub Actions
-       * đánh dấu workflow có lỗi.
-       */
-
-      process.exit(
-        1
-      );
+      process.exitCode =
+        1;
 
     }
   );
