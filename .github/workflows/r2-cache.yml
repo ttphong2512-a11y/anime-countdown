@@ -1,72 +1,51 @@
 # ============================================================
 # WHY2YUE — R2 ANIME CACHE
 # ============================================================
-#
-# anime-ids.json
-#       ↓
-# update-cache.js
-#       ↓
-# AniList
-#       ↓
-# Cloudflare R2
-#
-# Chỉ cập nhật những AniList ID có trong anime-ids.json.
-#
-# Ví dụ:
-#
-# [
-#   {
-#     "id": 21,
-#     "name": "ONE PIECE"
-#   },
-#   {
-#     "id": 196017,
-#     "name": "Anime 196017"
-#   }
-# ]
-#
-# R2:
-#
-# anime/21.json
-# anime/196017.json
-#
-# ============================================================
-
 
 name: Update Anime Cache
 
-
 # ============================================================
-# TRIGGER
+# TRIGGERS
+# ============================================================
+#
+# push:
+#   Khi anime-ids.json được commit thay đổi
+#   → chỉ xử lý anime ID mới.
+#
+# schedule:
+#   Mỗi 3 giờ
+#   → kiểm tra/cập nhật toàn bộ anime.
+#
+# workflow_dispatch:
+#   Chạy thủ công
+#   → kiểm tra/cập nhật toàn bộ anime.
+#
 # ============================================================
 
 on:
 
   # ----------------------------------------------------------
-  # TỰ ĐỘNG
+  # Khi thay đổi anime-ids.json
   # ----------------------------------------------------------
-  #
-  # Chạy mỗi 3 giờ.
-  #
-  # 00:17
-  # 03:17
-  # 06:17
-  # 09:17
-  # ...
-  #
+
+  push:
+
+    paths:
+      - "anime-ids.json"
+
+  # ----------------------------------------------------------
+  # Kiểm tra định kỳ mỗi 3 giờ
   # ----------------------------------------------------------
 
   schedule:
 
     - cron: "17 */3 * * *"
 
-
   # ----------------------------------------------------------
-  # CHẠY THỦ CÔNG
+  # Chạy thủ công
   # ----------------------------------------------------------
 
   workflow_dispatch:
-
 
 # ============================================================
 # PERMISSIONS
@@ -76,6 +55,23 @@ permissions:
 
   contents: write
 
+# ============================================================
+# CONCURRENCY
+# ============================================================
+#
+# Không cho nhiều lần update cache chạy chồng lên nhau.
+#
+# cancel-in-progress: false
+# → không hủy job đang chạy.
+# → job mới sẽ chờ job cũ hoàn thành.
+#
+# ============================================================
+
+concurrency:
+
+  group: anime-cache-update
+
+  cancel-in-progress: false
 
 # ============================================================
 # JOB
@@ -85,76 +81,59 @@ jobs:
 
   update-anime-cache:
 
-    runs-on:
-      ubuntu-latest
-
+    runs-on: ubuntu-latest
 
     steps:
 
-
       # ======================================================
-      # 1. CHECKOUT
+      # CHECKOUT
       # ======================================================
-
-      - name:
-          Checkout repository
-
-        uses:
-          actions/checkout@v4
-
-
-      # ======================================================
-      # 2. NODE.JS
+      #
+      # fetch-depth: 0 rất quan trọng.
+      #
+      # Incremental mode cần đọc:
+      #
+      # github.event.before
+      #
+      # để biết anime ID nào đã được thêm vào commit hiện tại.
+      #
       # ======================================================
 
-      - name:
-          Setup Node.js
+      - name: Checkout repository
 
-        uses:
-          actions/setup-node@v4
+        uses: actions/checkout@v4
 
         with:
 
-          node-version:
-            20
-
+          fetch-depth: 0
 
       # ======================================================
-      # 3. INSTALL AWS SDK
-      # ======================================================
-      #
-      # update-cache.js sử dụng:
-      #
-      # @aws-sdk/client-s3
-      #
-      # để ghi dữ liệu vào Cloudflare R2.
-      #
+      # NODE.JS
       # ======================================================
 
-      - name:
-          Install dependencies
+      - name: Setup Node.js
+
+        uses: actions/setup-node@v4
+
+        with:
+
+          node-version: 20
+
+      # ======================================================
+      # INSTALL AWS SDK
+      # ======================================================
+
+      - name: Install dependencies
 
         run: |
 
           npm install --no-save @aws-sdk/client-s3
 
-
       # ======================================================
-      # 4. UPDATE R2
-      # ======================================================
-      #
-      # Đọc:
-      #
-      # anime-ids.json
-      #
-      # Sau đó:
-      #
-      # AniList → R2
-      #
+      # UPDATE CLOUDFLARE R2
       # ======================================================
 
-      - name:
-          Update Cloudflare R2
+      - name: Update Cloudflare R2
 
         env:
 
@@ -170,17 +149,39 @@ jobs:
           R2_BUCKET:
             ogeview-anime
 
+          # --------------------------------------------------
+          # PUSH
+          # → incremental
+          #
+          # SCHEDULE / MANUAL
+          # → full
+          # --------------------------------------------------
+
+          UPDATE_MODE:
+            ${{ github.event_name == 'push' && 'incremental' || 'full' }}
+
+          # --------------------------------------------------
+          # SHA trước khi push
+          #
+          # update-cache.js dùng giá trị này để lấy
+          # anime-ids.json của commit trước.
+          # --------------------------------------------------
+
+          GITHUB_EVENT_BEFORE:
+            ${{ github.event.before }}
+
+          GITHUB_SHA:
+            ${{ github.sha }}
 
         run:
 
           node update-cache.js
 
-
       # ======================================================
-      # 5. KIỂM TRA THAY ĐỔI anime-ids.json
+      # CHECK ANIME LIST CHANGES
       # ======================================================
       #
-      # update-cache.js có thể tự cập nhật:
+      # update-cache.js có thể cập nhật:
       #
       # "Anime 196017"
       #
@@ -188,11 +189,9 @@ jobs:
       #
       # ======================================================
 
-      - name:
-          Check anime list changes
+      - name: Check anime list changes
 
-        id:
-          check_changes
+        id: check_changes
 
         run: |
 
@@ -206,19 +205,16 @@ jobs:
 
           fi
 
-
       # ======================================================
-      # 6. COMMIT TÊN ANIME MỚI
+      # COMMIT UPDATED NAMES
       # ======================================================
       #
-      # Chỉ commit nếu anime-ids.json thực sự thay đổi.
-      #
-      # Không tạo commit vô ích mỗi lần workflow chạy.
+      # Chỉ commit nếu update-cache.js thực sự thay đổi
+      # anime-ids.json.
       #
       # ======================================================
 
-      - name:
-          Commit updated anime names
+      - name: Commit updated anime names
 
         if:
           steps.check_changes.outputs.changed == 'true'
